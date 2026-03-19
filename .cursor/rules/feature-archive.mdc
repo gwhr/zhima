@@ -1,0 +1,59 @@
+---
+description: 功能开发完成或修改后，强制归档到 openspec/changes/ 对应模块文档
+alwaysApply: true
+---
+
+# 功能归档规范
+
+每次功能开发完成、修改或 Bug 修复后，**必须**同步更新以下文档，缺少文档视为未完成。
+
+## 归档位置
+
+```
+openspec/changes/<module-name>/
+├── proposal.md   # 做什么、为什么
+├── design.md     # 技术方案（数据流、依赖、关键实现）
+├── specs.md      # API 接口规格
+└── tasks.md      # 任务进度 + 修复记录
+```
+
+常用模块名对照：
+
+| 功能 | 模块目录 |
+|------|----------|
+| UI 样式/交互调整 | `ui-polish` |
+| Worker 逻辑 | `worker-logic` |
+| 论文生成 | `thesis-generator` |
+| 图表嵌入 | `thesis-diagrams` |
+| AI 对话修改代码 | `ai-code-modify` |
+| 运行预览 | `preview-build` |
+| 文件预览 | `code-preview` |
+
+## 必须更新的场景
+
+| 场景 | 动作 |
+|------|------|
+| 新增功能模块 | 在 `changes/` 下新建模块目录，创建 4 个文档 |
+| 已有模块新增功能 | `tasks.md` 添加新 T 编号任务并勾选 |
+| Bug 修复 | `tasks.md` 底部「修复记录」区追加 `- **修复**: 现象 → 根因+方案` |
+| 技术方案变更 | 更新 `design.md`，说明变更前后对比 |
+
+## tasks.md 格式
+
+```markdown
+## 实现任务
+- [x] T1: 任务描述
+- [ ] T2: 待完成任务
+
+## 修复记录
+- **修复**: Worker 重启中断任务 → tsx --watch 改为 --watch-path=worker
+```
+
+## 完成后同步 ROADMAP
+
+功能归档后还需更新 `openspec/ROADMAP.md`：
+
+1. 「已完成模块」表中添加/更新条目
+2. 「剩余待办」中移除已完成项
+3. 「文件统计」数字保持准确
+4. 有重要修复时追加到「关键修复记录」表

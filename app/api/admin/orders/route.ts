@@ -1,0 +1,20 @@
+import { db } from "@/lib/db";
+import { success, error } from "@/lib/api-response";
+import { requireAdmin } from "@/lib/auth-helpers";
+
+export async function GET() {
+  const { error: authError } = await requireAdmin();
+  if (authError) return authError;
+
+  const orders = await db.order.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 100,
+    include: {
+      user: {
+        select: { name: true, email: true },
+      },
+    },
+  });
+
+  return success(orders);
+}
