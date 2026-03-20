@@ -1,4 +1,6 @@
 import { Navbar } from "@/components/layout/navbar";
+import { getSession } from "@/lib/auth-helpers";
+import { redirect } from "next/navigation";
 import Link from "next/link";
 import { BarChart3, Users, FileBox, ShieldCheck } from "lucide-react";
 
@@ -8,11 +10,21 @@ const adminNav = [
   { href: "/admin/orders", icon: FileBox, label: "订单管理" },
 ];
 
-export default function AdminLayout({
+export default async function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const session = await getSession();
+
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  if (session.user.role !== "ADMIN") {
+    redirect("/dashboard");
+  }
+
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />

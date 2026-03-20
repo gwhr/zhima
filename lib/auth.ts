@@ -2,24 +2,32 @@ import { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
+import { ensureBuiltinAdminUser } from "@/lib/bootstrap/admin-user";
 import { verifyCode } from "@/lib/sms/provider";
 
 export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
       id: "email-login",
-      name: "邮箱登录",
+      name: "账号登录",
       credentials: {
-        email: { label: "邮箱", type: "email" },
+        identifier: { label: "账号", type: "text" },
         password: { label: "密码", type: "password" },
       },
       async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) {
-          throw new Error("请输入邮箱和密码");
+        await ensureBuiltinAdminUser();
+
+        const identifier =
+          credentials?.identifier?.trim() || credentials?.email?.trim();
+
+        if (!identifier || !credentials?.password) {
+          throw new Error("请输入账号和密码");
         }
 
-        const user = await db.user.findUnique({
-          where: { email: credentials.email },
+        const user = await db.user.findFirst({
+          where: identifier.includes("@")
+            ? { email: identifier }
+            : { phone: identifier },
         });
 
         if (!user) throw new Error("账号不存在");

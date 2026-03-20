@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
+import { ensureBuiltinAdminUser } from "@/lib/bootstrap/admin-user";
 import { checkCode } from "@/lib/sms/provider";
 import { generateNickname } from "@/lib/utils/name-generator";
 
 export async function POST(req: Request) {
   try {
+    await ensureBuiltinAdminUser();
+
     const body = await req.json();
     const { email, password, name, phone, code } = body;
 

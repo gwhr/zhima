@@ -51,6 +51,11 @@ NEXTAUTH_URL=http://localhost:3000
 # 智谱 AI（必填，去 open.bigmodel.cn 获取）
 ZHIPU_API_KEY=你的API Key
 ZHIPU_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+
+# 内置管理员账号（生产环境务必修改）
+BUILTIN_ADMIN_PHONE=15811410745
+BUILTIN_ADMIN_PASSWORD=15811410745
+BUILTIN_ADMIN_NAME=系统管理员
 ```
 
 ### 4. 初始化数据库
@@ -72,6 +77,12 @@ pnpm worker:dev
 ```
 
 打开 http://localhost:3000 即可访问。
+
+本地启动后，系统会自动确保存在一个管理员账号，可在“账号登录”里直接用“手机号 + 密码”方式登录：
+
+- `15811410745 / 15811410745`
+
+生产环境上线前请务必修改内置管理员密码。
 
 ---
 

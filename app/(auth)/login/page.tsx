@@ -22,7 +22,7 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
 
   const [phone, setPhone] = useState("");
@@ -30,13 +30,19 @@ export default function LoginPage() {
   const [codeSending, setCodeSending] = useState(false);
   const [countdown, setCountdown] = useState(0);
 
-  async function handleEmailLogin(e: React.FormEvent) {
+  async function resolveTargetPath() {
+    const res = await fetch("/api/auth/session");
+    const session = await res.json();
+    return session?.user?.role === "ADMIN" ? "/admin" : "/dashboard";
+  }
+
+  async function handleAccountLogin(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
 
     const result = await signIn("email-login", {
-      email,
+      identifier,
       password,
       redirect: false,
     });
@@ -46,7 +52,7 @@ export default function LoginPage() {
       setError(result.error);
       return;
     }
-    router.push("/dashboard");
+    router.push(await resolveTargetPath());
     router.refresh();
   }
 
@@ -66,7 +72,7 @@ export default function LoginPage() {
       setError(result.error);
       return;
     }
-    router.push("/dashboard");
+    router.push(await resolveTargetPath());
     router.refresh();
   }
 
@@ -110,10 +116,10 @@ export default function LoginPage() {
         <CardDescription>选择你喜欢的方式登录</CardDescription>
       </CardHeader>
 
-      <Tabs defaultValue="email" className="w-full">
+      <Tabs defaultValue="account" className="w-full">
         <div className="px-6">
           <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="email">邮箱登录</TabsTrigger>
+            <TabsTrigger value="account">账号登录</TabsTrigger>
             <TabsTrigger value="phone">手机号登录</TabsTrigger>
           </TabsList>
         </div>
@@ -124,17 +130,17 @@ export default function LoginPage() {
           </div>
         )}
 
-        <TabsContent value="email">
-          <form onSubmit={handleEmailLogin}>
+        <TabsContent value="account">
+          <form onSubmit={handleAccountLogin}>
             <CardContent className="space-y-4 pt-4">
               <div className="space-y-2">
-                <Label htmlFor="email">邮箱</Label>
+                <Label htmlFor="identifier">邮箱或手机号</Label>
                 <Input
-                  id="email"
-                  type="email"
-                  placeholder="your@email.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  id="identifier"
+                  type="text"
+                  placeholder="请输入邮箱或手机号"
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
                   required
                 />
               </div>
