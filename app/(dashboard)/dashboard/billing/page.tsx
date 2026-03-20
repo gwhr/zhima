@@ -14,14 +14,30 @@ interface Plan {
   description: string;
 }
 
+interface TokenSummary {
+  tokenBudget: number;
+  tokenUsed: number;
+  tokenRemaining: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export default function BillingPage() {
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [tokenSummary, setTokenSummary] = useState<TokenSummary | null>(null);
 
   useEffect(() => {
-    fetch("/api/billing/plans")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.success) setPlans(data.data);
+    Promise.all([fetch("/api/billing/plans"), fetch("/api/billing/tokens")])
+      .then(async ([plansRes, tokensRes]) => {
+        const [plansData, tokensData] = await Promise.all([
+          plansRes.json(),
+          tokensRes.json(),
+        ]);
+        if (plansData.success) setPlans(plansData.data);
+        if (tokensData.success) setTokenSummary(tokensData.data);
+      })
+      .catch(() => {
+        // ignore dashboard data error
       });
   }, []);
 
@@ -43,6 +59,41 @@ export default function BillingPage() {
         <h1 className="text-2xl font-bold">套餐管理</h1>
         <p className="text-muted-foreground mt-1">选择适合你的套餐方案</p>
       </div>
+
+      {tokenSummary && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle>Token 配额</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-3 md:grid-cols-4">
+            <div>
+              <p className="text-xs text-muted-foreground">总额度</p>
+              <p className="text-xl font-semibold">
+                {tokenSummary.tokenBudget.toLocaleString()}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">已使用</p>
+              <p className="text-xl font-semibold">
+                {tokenSummary.tokenUsed.toLocaleString()}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">剩余</p>
+              <p className="text-xl font-semibold text-green-600">
+                {tokenSummary.tokenRemaining.toLocaleString()}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">输入/输出</p>
+              <p className="text-sm">
+                {tokenSummary.inputTokens.toLocaleString()} /{" "}
+                {tokenSummary.outputTokens.toLocaleString()}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-6 md:grid-cols-3">
         {plans.map((plan) => (

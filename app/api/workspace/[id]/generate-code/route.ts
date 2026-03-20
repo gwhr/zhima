@@ -2,6 +2,25 @@ import { db } from "@/lib/db";
 import { success, error } from "@/lib/api-response";
 import { requireAuth } from "@/lib/auth-helpers";
 import { taskQueue } from "@/lib/queue";
+import { ensureUserTokenQuota } from "@/lib/ai/usage";
+import { Prisma } from "@prisma/client";
+
+type WorkspaceRequirements = {
+  featureConfirmed?: boolean;
+  difficultyAssessment?: unknown;
+  previewConfirmed?: boolean;
+  previewConfirmedAt?: string | null;
+};
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const CODE_GEN_TOKEN_RESERVE = parsePositiveInt(
+  process.env.CODE_GEN_TOKEN_RESERVE,
+  120_000
+);
 
 export async function POST(
   _req: Request,
@@ -16,11 +35,51 @@ export async function POST(
   if (!workspace) return error("工作空间不存在", 404);
   if (workspace.userId !== session!.user.id) return error("无权限", 403);
 
+  const requirements =
+    workspace.requirements &&
+    typeof workspace.requirements === "object" &&
+    !Array.isArray(workspace.requirements)
+      ? (workspace.requirements as WorkspaceRequirements)
+      : {};
+
+  if (!requirements.featureConfirmed) {
+    return error("请先确认功能范围并完成难度评估", 400);
+  }
+
+  if (!requirements.difficultyAssessment) {
+    return error("缺少难度评估结果，请先重新确认功能", 400);
+  }
+
+  try {
+    await ensureUserTokenQuota(
+      session!.user.id,
+      CODE_GEN_TOKEN_RESERVE,
+      "代码生成"
+    );
+  } catch (quotaError) {
+    return error(
+      quotaError instanceof Error ? quotaError.message : "Token 额度不足",
+      402
+    );
+  }
+
   const existingJob = await db.taskJob.findFirst({
     where: { workspaceId: id, type: "CODE_GEN", status: { in: ["PENDING", "RUNNING"] } },
   });
 
   if (existingJob) return error("代码正在生成中", 409);
+
+  // 每次重新生成代码时，必须重新完成预览确认，避免论文基于未核验版本继续生成。
+  await db.workspace.update({
+    where: { id },
+    data: {
+      requirements: {
+        ...requirements,
+        previewConfirmed: false,
+        previewConfirmedAt: null,
+      } as Prisma.InputJsonValue,
+    },
+  });
 
   const job = await db.taskJob.create({
     data: {

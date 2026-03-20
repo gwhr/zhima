@@ -3,10 +3,9 @@ config({ path: ".env.local" });
 config({ path: ".env" });
 import { Worker } from "bullmq";
 import Redis from "ioredis";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type AiTaskType } from "@prisma/client";
 import { generateText } from "ai";
-import { createOpenAI } from "@ai-sdk/openai";
-import { parseCodeBlocks } from "../lib/parser/code-parser";
+import { parseCodeBlocks, type ParsedFile } from "../lib/parser/code-parser";
 import { buildDocx } from "../lib/thesis/docx-builder";
 import { renderMermaidToPng, renderMermaidToSvg, extractMermaidBlocks } from "../lib/chart/renderer";
 import {
@@ -17,8 +16,9 @@ import {
   type TableSchema,
 } from "../lib/chart/diagram-generator";
 import sharp from "sharp";
-import * as fs from "fs/promises";
 import * as path from "path";
+import { uploadFile } from "../lib/storage/oss";
+import { modelCosts, models, type ModelId } from "../lib/ai/providers";
 
 const connection = new Redis(process.env.REDIS_URL || "redis://localhost:6379", {
   maxRetriesPerRequest: null,
@@ -27,26 +27,522 @@ const connection = new Redis(process.env.REDIS_URL || "redis://localhost:6379", 
 
 const db = new PrismaClient();
 
-const STORAGE_DIR = path.join(process.cwd(), ".storage");
-
 async function saveFile(key: string, content: string | Buffer) {
-  const filePath = path.join(STORAGE_DIR, key);
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, content);
-  return key;
+  return uploadFile(key, content);
 }
 
-const zhipu = createOpenAI({
-  apiKey: process.env.ZHIPU_API_KEY || "",
-  baseURL: process.env.ZHIPU_BASE_URL || "https://open.bigmodel.cn/api/paas/v4",
-});
-const model = zhipu.chat("glm-4-flash");
+const DEFAULT_CODE_MODEL_ID: ModelId = "deepseek";
+const DEFAULT_THESIS_MODEL_ID: ModelId = "glm";
+
+function resolveModelId(value: string | undefined, fallback: ModelId): ModelId {
+  if (!value) return fallback;
+  return value in models ? (value as ModelId) : fallback;
+}
+
+const CODE_MODEL_ID = resolveModelId(
+  process.env.CODE_GEN_MODEL_ID,
+  DEFAULT_CODE_MODEL_ID
+);
+const THESIS_MODEL_ID = resolveModelId(
+  process.env.THESIS_GEN_MODEL_ID,
+  DEFAULT_THESIS_MODEL_ID
+);
+const WORKER_MODEL_ID: ModelId = CODE_MODEL_ID;
+
+function getModelForJob(
+  jobName: string
+): {
+  modelId: ModelId;
+  model: (typeof models)[ModelId];
+  taskType: AiTaskType;
+} {
+  switch (jobName) {
+    case "code-gen":
+      return {
+        modelId: CODE_MODEL_ID,
+        model: models[CODE_MODEL_ID],
+        taskType: "CODE_GEN",
+      };
+    case "thesis-gen":
+      return {
+        modelId: THESIS_MODEL_ID,
+        model: models[THESIS_MODEL_ID],
+        taskType: "THESIS",
+      };
+    case "chart-render":
+      return {
+        modelId: THESIS_MODEL_ID,
+        model: models[THESIS_MODEL_ID],
+        taskType: "CHART",
+      };
+    default:
+      return {
+        modelId: CODE_MODEL_ID,
+        model: models[CODE_MODEL_ID],
+        taskType: "MODIFY_SIMPLE",
+      };
+  }
+}
+
+type UsageLike = {
+  inputTokens?: number;
+  outputTokens?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+};
+
+interface TokenUsageSummary {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
+function normalizeUsage(usage: UsageLike | undefined): TokenUsageSummary {
+  const inputTokens = usage?.inputTokens ?? usage?.promptTokens ?? 0;
+  const outputTokens = usage?.outputTokens ?? usage?.completionTokens ?? 0;
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+  };
+}
+
+function addUsage(
+  total: TokenUsageSummary,
+  next: TokenUsageSummary
+): TokenUsageSummary {
+  const inputTokens = total.inputTokens + next.inputTokens;
+  const outputTokens = total.outputTokens + next.outputTokens;
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+  };
+}
+
+async function recordWorkerUsage(params: {
+  userId: string;
+  workspaceId: string;
+  taskType: AiTaskType;
+  modelId: ModelId;
+  usage: TokenUsageSummary;
+  durationMs: number;
+}) {
+  if (params.usage.totalTokens <= 0) return;
+
+  const costs = modelCosts[params.modelId];
+  const costYuan =
+    (params.usage.inputTokens / 1_000_000) * costs.input +
+    (params.usage.outputTokens / 1_000_000) * costs.output;
+
+  await db.aiUsageLog.create({
+    data: {
+      userId: params.userId,
+      workspaceId: params.workspaceId,
+      taskType: params.taskType,
+      model: params.modelId,
+      inputTokens: params.usage.inputTokens,
+      outputTokens: params.usage.outputTokens,
+      costYuan,
+      durationMs: params.durationMs,
+    },
+  });
+}
+
+async function updateJobProgress(
+  jobId: string,
+  progress: number,
+  stage: string,
+  detail: string,
+  modelOrExtras: ModelId | Record<string, unknown> = DEFAULT_CODE_MODEL_ID,
+  extras: Record<string, unknown> = {}
+) {
+  const modelId =
+    typeof modelOrExtras === "string"
+      ? modelOrExtras
+      : DEFAULT_CODE_MODEL_ID;
+  const mergedExtras =
+    typeof modelOrExtras === "string" ? extras : modelOrExtras;
+
+  await db.taskJob.update({
+    where: { id: jobId },
+    data: {
+      status: "RUNNING",
+      progress,
+      result: {
+        stage,
+        detail,
+        model: modelId,
+        updatedAt: new Date().toISOString(),
+        ...mergedExtras,
+      },
+    },
+  });
+}
 
 interface Requirements {
   summary?: string;
   roles?: { name: string; description: string }[];
   modules?: { name: string; features: string[]; enabled?: boolean }[];
   tables?: string[];
+}
+
+function sanitizeGeneratedPath(filePath: string): string {
+  const normalized = filePath
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/^(\.\.\/)+/, "")
+    .replace(/^\.\//, "")
+    .trim();
+  if (!normalized || normalized.includes("\0")) {
+    return "";
+  }
+  return normalized;
+}
+
+function rewriteGeneratedPath(
+  generatedPath: string,
+  techStack: Record<string, string>
+): string {
+  const parsed = path.parse(generatedPath);
+  const ext = parsed.ext.toLowerCase();
+  const generatedNum = parsed.name.match(/^generated_(\d+)$/i)?.[1];
+  const readableName = generatedNum ? `module-${generatedNum}` : parsed.name.replace(/_/g, "-").toLowerCase();
+  const className = generatedNum ? `Module${generatedNum}` : parsed.name;
+  const slug = readableName;
+  const backend = (techStack.backend || "").toLowerCase();
+  const frontend = (techStack.frontend || "").toLowerCase();
+
+  if (ext === ".java") {
+    return `backend/src/main/java/com/example/generated/${className}.java`;
+  }
+  if (ext === ".vue" || (ext === ".js" && frontend.includes("vue"))) {
+    return `frontend/src/views/generated/${slug}${ext}`;
+  }
+  if (ext === ".tsx" || ext === ".jsx" || ext === ".ts" || ext === ".js") {
+    return `frontend/src/generated/${slug}${ext}`;
+  }
+  if (ext === ".sql") {
+    return `backend/sql/${slug}.sql`;
+  }
+  if (ext === ".json") {
+    return backend.includes("java")
+      ? `backend/src/main/resources/${className}.json`
+      : `backend/config/${className}.json`;
+  }
+  if (ext === ".md") {
+    return parsed.name.toLowerCase() === "readme" ? "README.md" : `docs/${slug}.md`;
+  }
+  return `generated/${slug || "file"}${ext || ".txt"}`;
+}
+
+function buildFallbackReadme(
+  workspaceName: string,
+  workspaceTopic: string,
+  techStack: Record<string, string>
+): string {
+  return `# ${workspaceName}
+
+## 项目说明
+
+本项目由智码 AI 根据「${workspaceTopic}」自动生成。
+
+## 技术栈
+
+- 后端：${techStack.backend || "未指定"}
+- 前端：${techStack.frontend || "未指定"}
+- 数据库：${techStack.database || "未指定"}
+
+## 本地运行（示例）
+
+\`\`\`bash
+# 安装依赖
+npm install
+
+# 启动开发环境
+npm run dev
+\`\`\`
+`;
+}
+
+function normalizeGeneratedFiles(
+  rawFiles: ParsedFile[],
+  workspaceName: string,
+  workspaceTopic: string,
+  techStack: Record<string, string>
+): ParsedFile[] {
+  const deduped = new Map<string, ParsedFile>();
+
+  for (const file of rawFiles) {
+    const normalizedPath = sanitizeGeneratedPath(file.path);
+    if (!normalizedPath) continue;
+    const finalPath = /^generated_\d+\.\w+$/i.test(normalizedPath)
+      ? rewriteGeneratedPath(normalizedPath, techStack)
+      : normalizedPath;
+    if (finalPath.length > 180) continue;
+
+    deduped.set(finalPath, {
+      ...file,
+      path: finalPath,
+      content: `${file.content.trim()}\n`,
+    });
+  }
+
+  const hasReadme = Array.from(deduped.keys()).some(
+    (p) => p.toLowerCase() === "readme.md"
+  );
+  if (!hasReadme) {
+    deduped.set("README.md", {
+      path: "README.md",
+      language: "markdown",
+      content: buildFallbackReadme(workspaceName, workspaceTopic, techStack),
+    });
+  }
+
+  return Array.from(deduped.values());
+}
+
+function buildCodeGenPrompt(
+  workspace: { name: string; topic: string; techStack: unknown; requirements: unknown }
+): string {
+  const techStack = (workspace.techStack as Record<string, string>) || {};
+  const requirements = (workspace.requirements as Requirements) || {};
+  const modules = requirements.modules || [];
+  const roles = requirements.roles || [];
+  const tables = requirements.tables || [];
+
+  const techStr =
+    Object.entries(techStack)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join(", ") || "Java Spring Boot + Vue 3 + MySQL";
+
+  const modulesText =
+    modules.map((m) => `- ${m.name}: ${m.features.join("、")}`).join("\n") || "- 基础 CRUD";
+  const rolesText =
+    roles.map((r) => `- ${r.name}: ${r.description}`).join("\n") || "- 管理员 / 普通用户";
+  const tablesText = tables.map((t) => `- ${t}`).join("\n") || "- users";
+
+  return `你是资深全栈工程师。请为以下毕设项目生成“可运行”的最小完整代码骨架。
+
+项目名称：${workspace.name}
+项目选题：${workspace.topic}
+技术栈：${techStr}
+
+系统角色：
+${rolesText}
+
+功能模块：
+${modulesText}
+
+数据库表：
+${tablesText}
+
+强制输出规范（必须严格遵守）：
+1. 仅输出代码文件，不要解释性自然语言。
+2. 每个文件必须使用下面格式（每个文件一个代码块）：
+File: 相对路径
+\`\`\`语言 // 相对路径
+...文件内容...
+\`\`\`
+3. 路径必须使用相对路径，禁止绝对路径，禁止 \`../\`。
+4. 至少输出 10 个文件，且必须包含 \`README.md\`。
+5. 必须覆盖：后端入口、前端入口、至少 2 个业务页面、至少 2 个 API、1 个数据模型/SQL、1 个配置文件。
+6. 代码风格以教学可读性为主，可添加必要中文注释。
+
+建议目录结构（按技术栈灵活调整）：
+- backend/
+- frontend/
+- docs/（可选）`;
+}
+
+const MIN_CODE_FILES = 6;
+const MAX_CODE_GEN_ATTEMPTS = 3;
+
+function buildCodeGenAttemptPrompt(basePrompt: string, attempt: number): string {
+  if (attempt === 1) return basePrompt;
+
+  return `${basePrompt}
+
+【纠偏重试 #${attempt}】
+你上一次输出的文件数量不足，必须严格满足以下要求：
+1. 这次至少输出 12 个文件代码块；
+2. 每个代码块都要带明确文件路径，格式必须是：
+File: 相对路径
+\`\`\`语言 // 相对路径
+...文件内容...
+\`\`\`
+3. 必须包含以下关键文件：
+- backend 启动入口
+- backend 至少 2 个业务接口（controller/router）
+- backend 至少 1 个数据模型或 SQL
+- frontend 启动入口
+- frontend 至少 2 个页面
+- README.md
+4. 只输出代码文件，不要输出解释文字。`;
+}
+
+async function generateCodeFilesWithRetry(
+  workspace: { name: string; topic: string; techStack: unknown; requirements: unknown },
+  techStack: Record<string, string>,
+  selectedModel: (typeof models)[ModelId]
+): Promise<{
+  files: ParsedFile[];
+  attempts: number;
+  fallback: boolean;
+  usage: TokenUsageSummary;
+}> {
+  const basePrompt = buildCodeGenPrompt(workspace);
+  let files: ParsedFile[] = [];
+  let usage: TokenUsageSummary = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+
+  for (let attempt = 1; attempt <= MAX_CODE_GEN_ATTEMPTS; attempt++) {
+    const prompt = buildCodeGenAttemptPrompt(basePrompt, attempt);
+    const result = await generateText({ model: selectedModel, prompt });
+    usage = addUsage(usage, normalizeUsage(result.usage as UsageLike));
+    files = normalizeGeneratedFiles(
+      parseCodeBlocks(result.text),
+      workspace.name,
+      workspace.topic,
+      techStack
+    );
+
+    console.log(
+      `[Worker] code-gen attempt ${attempt}/${MAX_CODE_GEN_ATTEMPTS}, parsed files=${files.length}`
+    );
+
+    if (files.length >= MIN_CODE_FILES) {
+      return { files, attempts: attempt, fallback: false, usage };
+    }
+  }
+
+  const backend = (techStack.backend || "").toLowerCase();
+  const frontend = (techStack.frontend || "").toLowerCase();
+
+  const fallbackFiles: ParsedFile[] = [
+    {
+      path: "README.md",
+      language: "markdown",
+      content: buildFallbackReadme(workspace.name, workspace.topic, techStack),
+    },
+    {
+      path: "backend/README.md",
+      language: "markdown",
+      content: `# Backend\n\n本目录为 ${workspace.name} 的后端骨架代码（自动兜底生成）。\n`,
+    },
+    {
+      path: "frontend/README.md",
+      language: "markdown",
+      content: `# Frontend\n\n本目录为 ${workspace.name} 的前端骨架代码（自动兜底生成）。\n`,
+    },
+    {
+      path: "backend/sql/init.sql",
+      language: "sql",
+      content: `-- ${workspace.topic} 初始化表（兜底）\nCREATE TABLE IF NOT EXISTS users (\n  id BIGINT PRIMARY KEY,\n  username VARCHAR(64) NOT NULL,\n  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n);\n`,
+    },
+  ];
+
+  if (backend.includes("java")) {
+    fallbackFiles.push(
+      {
+        path: "backend/src/main/java/com/example/Application.java",
+        language: "java",
+        content:
+          "package com.example;\n\nimport org.springframework.boot.SpringApplication;\nimport org.springframework.boot.autoconfigure.SpringBootApplication;\n\n@SpringBootApplication\npublic class Application {\n  public static void main(String[] args) {\n    SpringApplication.run(Application.class, args);\n  }\n}\n",
+      },
+      {
+        path: "backend/src/main/java/com/example/controller/HealthController.java",
+        language: "java",
+        content:
+          "package com.example.controller;\n\nimport org.springframework.web.bind.annotation.GetMapping;\nimport org.springframework.web.bind.annotation.RestController;\n\n@RestController\npublic class HealthController {\n  @GetMapping(\"/api/health\")\n  public String health() {\n    return \"ok\";\n  }\n}\n",
+      },
+      {
+        path: "backend/src/main/resources/application.yml",
+        language: "yaml",
+        content:
+          "server:\n  port: 8080\nspring:\n  datasource:\n    url: jdbc:mysql://localhost:3306/demo\n    username: root\n    password: root\n",
+      }
+    );
+  } else {
+    fallbackFiles.push(
+      {
+        path: "backend/package.json",
+        language: "json",
+        content:
+          '{\n  "name": "backend",\n  "private": true,\n  "scripts": {\n    "dev": "node src/main.js"\n  }\n}\n',
+      },
+      {
+        path: "backend/src/main.js",
+        language: "javascript",
+        content:
+          "import http from \"node:http\";\n\nconst server = http.createServer((_req, res) => {\n  res.setHeader(\"content-type\", \"application/json\");\n  res.end(JSON.stringify({ ok: true }));\n});\n\nserver.listen(3001, () => {\n  console.log(\"backend running on :3001\");\n});\n",
+      },
+      {
+        path: "backend/src/routes/health.js",
+        language: "javascript",
+        content: "export const health = { status: \"ok\" };\n",
+      }
+    );
+  }
+
+  if (frontend.includes("vue")) {
+    fallbackFiles.push(
+      {
+        path: "frontend/package.json",
+        language: "json",
+        content:
+          '{\n  "name": "frontend",\n  "private": true,\n  "scripts": {\n    "dev": "vite"\n  }\n}\n',
+      },
+      {
+        path: "frontend/src/main.js",
+        language: "javascript",
+        content:
+          "import { createApp } from \"vue\";\nimport App from \"./App.vue\";\n\ncreateApp(App).mount(\"#app\");\n",
+      },
+      {
+        path: "frontend/src/App.vue",
+        language: "vue",
+        content:
+          "<template>\n  <main style=\"padding: 24px; font-family: Arial;\">\n    <h1>项目骨架已生成</h1>\n    <p>可基于此继续完善业务功能。</p>\n  </main>\n</template>\n",
+      }
+    );
+  } else {
+    fallbackFiles.push(
+      {
+        path: "frontend/package.json",
+        language: "json",
+        content:
+          '{\n  "name": "frontend",\n  "private": true,\n  "scripts": {\n    "dev": "vite"\n  }\n}\n',
+      },
+      {
+        path: "frontend/src/main.tsx",
+        language: "typescript",
+        content:
+          "import React from \"react\";\nimport { createRoot } from \"react-dom/client\";\nimport App from \"./App\";\n\ncreateRoot(document.getElementById(\"root\")!).render(<App />);\n",
+      },
+      {
+        path: "frontend/src/App.tsx",
+        language: "typescript",
+        content:
+          "export default function App() {\n  return (\n    <main style={{ padding: 24, fontFamily: \"Arial\" }}>\n      <h1>项目骨架已生成</h1>\n      <p>可基于此继续完善业务功能。</p>\n    </main>\n  );\n}\n",
+      }
+    );
+  }
+
+  console.warn(
+    `[Worker] code-gen fallback activated, parsed files=${files.length}, fallback files=${fallbackFiles.length}`
+  );
+
+  return {
+    files: normalizeGeneratedFiles(
+      fallbackFiles,
+      workspace.name,
+      workspace.topic,
+      techStack
+    ),
+    attempts: MAX_CODE_GEN_ATTEMPTS,
+    fallback: true,
+    usage,
+  };
 }
 
 async function generateDiagramsPng(
@@ -109,41 +605,37 @@ const worker = new Worker(
     const { jobId, workspaceId, userId } = job.data;
 
     try {
-      await db.taskJob.update({
-        where: { id: jobId },
-        data: { status: "RUNNING", progress: 10 },
-      });
+      await updateJobProgress(jobId, 10, "任务启动", "任务已进入执行队列");
 
       const workspace = await db.workspace.findUnique({ where: { id: workspaceId } });
       if (!workspace) throw new Error("Workspace not found");
 
       switch (job.name) {
         case "code-gen": {
-          await db.taskJob.update({ where: { id: jobId }, data: { progress: 20 } });
+          await updateJobProgress(
+            jobId,
+            20,
+            "生成代码",
+            "正在分析需求并构建代码生成提示词"
+          );
 
+          const { modelId: codeModelId, model: codeModel, taskType: codeTaskType } =
+            getModelForJob("code-gen");
+          const codeStartAt = Date.now();
           const techStack = workspace.techStack as Record<string, string>;
-          const techStr = Object.entries(techStack).map(([k, v]) => `${k}: ${v}`).join(", ");
+          const { files, attempts, fallback, usage } =
+            await generateCodeFilesWithRetry(workspace, techStack, codeModel);
 
-          const result = await generateText({
-            model,
-            prompt: `你是一个专业的全栈开发工程师。请为以下毕业设计项目生成完整的项目代码。
+          await updateJobProgress(
+            jobId,
+            60,
+            "保存代码文件",
+            `AI 生成完成，开始保存 ${files.length} 个文件`,
+            { attempts, fallback }
+          );
 
-项目名称：${workspace.name}
-选题：${workspace.topic}
-技术栈：${techStr || "Java Spring Boot + Vue.js"}
-
-要求：
-1. 生成完整的项目结构，每个文件用 \`\`\`语言 // 文件路径 格式标注
-2. 包含后端API、数据模型、前端页面
-3. 包含 README.md 说明如何运行项目
-4. 代码要有适当的中文注释
-5. 至少生成8-10个核心文件`,
-          });
-
-          await db.taskJob.update({ where: { id: jobId }, data: { progress: 60 } });
-
-          const files = parseCodeBlocks(result.text);
-          for (const file of files) {
+          for (let i = 0; i < files.length; i++) {
+            const file = files[i];
             const storageKey = `workspaces/${workspaceId}/code/${file.path}`;
             await saveFile(storageKey, file.content);
 
@@ -152,11 +644,48 @@ const worker = new Worker(
               create: { workspaceId, path: file.path, type: "CODE", storageKey, size: Buffer.byteLength(file.content) },
               update: { storageKey, size: Buffer.byteLength(file.content) },
             });
+
+            if ((i + 1) % Math.max(1, Math.floor(files.length / 5)) === 0 || i === files.length - 1) {
+              const saveProgress = Math.min(
+                95,
+                60 + Math.round(((i + 1) / files.length) * 35)
+              );
+              await updateJobProgress(
+                jobId,
+                saveProgress,
+                "保存代码文件",
+                `已保存 ${i + 1}/${files.length} 个文件`,
+                { attempts, fallback }
+              );
+            }
           }
+
+          await recordWorkerUsage({
+            userId,
+            workspaceId,
+            taskType: codeTaskType,
+            modelId: codeModelId,
+            usage,
+            durationMs: Date.now() - codeStartAt,
+          });
 
           await db.taskJob.update({
             where: { id: jobId },
-            data: { status: "COMPLETED", progress: 100, result: { fileCount: files.length } },
+            data: {
+              status: "COMPLETED",
+              progress: 100,
+              result: {
+                stage: "代码生成完成",
+                detail: `共生成 ${files.length} 个文件`,
+                model: codeModelId,
+                fileCount: files.length,
+                attempts,
+                fallback,
+                inputTokens: usage.inputTokens,
+                outputTokens: usage.outputTokens,
+                totalTokens: usage.totalTokens,
+              },
+            },
           });
 
           await db.notification.create({
@@ -164,13 +693,26 @@ const worker = new Worker(
               userId,
               type: "GENERATE_DONE",
               title: "代码生成完成",
-              content: `项目「${workspace.name}」的代码已生成完成，共 ${files.length} 个文件。`,
+              content: fallback
+                ? `项目「${workspace.name}」已生成兜底代码骨架，共 ${files.length} 个文件。`
+                : `项目「${workspace.name}」的代码已生成完成，共 ${files.length} 个文件。`,
             },
           });
           break;
         }
 
         case "thesis-gen": {
+          const {
+            modelId: thesisModelId,
+            model: thesisModel,
+            taskType: thesisTaskType,
+          } = getModelForJob("thesis-gen");
+          const thesisStartAt = Date.now();
+          let thesisUsage: TokenUsageSummary = {
+            inputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+          };
           const techStack = workspace.techStack as Record<string, string>;
           const techStr = Object.entries(techStack).map(([k, v]) => `${k}: ${v}`).join(", ");
           const requirements = (workspace.requirements as Requirements) || {};
@@ -179,7 +721,12 @@ const worker = new Worker(
           const tables = requirements.tables || [];
 
           // --- Step 1: Generate diagrams (20%) ---
-          await db.taskJob.update({ where: { id: jobId }, data: { progress: 15 } });
+          await updateJobProgress(
+            jobId,
+            15,
+            "生成论文",
+            "正在生成图表资源（架构图 / ER 图 / 用例图）"
+          );
           console.log("[Worker] Generating diagrams for thesis...");
 
           const diagramResult = await generateDiagramsPng(workspace);
@@ -196,7 +743,12 @@ const worker = new Worker(
             });
           }
 
-          await db.taskJob.update({ where: { id: jobId }, data: { progress: 25 } });
+          await updateJobProgress(
+            jobId,
+            25,
+            "生成论文",
+            "图表资源已就绪，正在准备章节上下文"
+          );
 
           // --- Step 2: Build context for AI ---
           const rolesDesc = roles.map((r) => `${r.name}: ${r.description}`).join("\n");
@@ -243,12 +795,18 @@ ${tablesDesc || "未定义"}
           for (let i = 0; i < chapters.length; i++) {
             const ch = chapters[i];
             const progress = Math.round(25 + ((i + 1) / chapters.length) * 60);
-            await db.taskJob.update({ where: { id: jobId }, data: { progress } });
+            await updateJobProgress(
+              jobId,
+              progress,
+              "生成论文",
+              `正在生成章节 ${i + 1}/${chapters.length}：${ch.title}`,
+              { chapterIndex: i + 1, chapterTotal: chapters.length, chapterTitle: ch.title }
+            );
 
             console.log(`[Worker] Generating chapter: ${ch.title} (${i + 1}/${chapters.length})`);
 
             const result = await generateText({
-              model,
+              model: thesisModel,
               prompt: `你是一位计算机科学专业的资深论文写作专家。请为以下毕业设计撰写「${ch.title}」章节。
 
 ${projectContext}
@@ -265,6 +823,10 @@ ${projectContext}
 4. 适当使用"首先/其次/最后"、"综上所述"等过渡词保证逻辑连贯`,
             });
 
+            thesisUsage = addUsage(
+              thesisUsage,
+              normalizeUsage(result.usage as UsageLike)
+            );
             chapterContents.push({ title: ch.key, content: result.text });
           }
 
@@ -299,7 +861,12 @@ ${projectContext}
           });
 
           // --- Step 4: Build DOCX (90%-100%) ---
-          await db.taskJob.update({ where: { id: jobId }, data: { progress: 90 } });
+          await updateJobProgress(
+            jobId,
+            90,
+            "组装文档",
+            "正在组装 DOCX 并写入图表与表结构"
+          );
           console.log("[Worker] Building DOCX with diagrams and tables...");
 
           const diagramImages: {
@@ -359,7 +926,30 @@ ${projectContext}
 
           await db.taskJob.update({
             where: { id: jobId },
-            data: { status: "COMPLETED", progress: 100, result: { chapters: chapters.length + 2, diagrams: diagramResult.svgs.length, tables: tableSchemas.length } },
+            data: {
+              status: "COMPLETED",
+              progress: 100,
+              result: {
+                stage: "论文生成完成",
+                detail: `章节 ${chapters.length + 2}，图表 ${diagramResult.svgs.length}，表结构 ${tableSchemas.length}`,
+                model: thesisModelId,
+                chapters: chapters.length + 2,
+                diagrams: diagramResult.svgs.length,
+                tables: tableSchemas.length,
+                inputTokens: thesisUsage.inputTokens,
+                outputTokens: thesisUsage.outputTokens,
+                totalTokens: thesisUsage.totalTokens,
+              },
+            },
+          });
+
+          await recordWorkerUsage({
+            userId,
+            workspaceId,
+            taskType: thesisTaskType,
+            modelId: thesisModelId,
+            usage: thesisUsage,
+            durationMs: Date.now() - thesisStartAt,
           });
 
           await db.notification.create({
@@ -374,12 +964,12 @@ ${projectContext}
         }
 
         case "chart-render": {
-          await db.taskJob.update({ where: { id: jobId }, data: { progress: 20 } });
+          await updateJobProgress(jobId, 20, "生成图表", "正在渲染图表资源");
           console.log("[Worker] Generating charts...");
 
           const { svgs } = await generateDiagramsPng(workspace);
 
-          await db.taskJob.update({ where: { id: jobId }, data: { progress: 80 } });
+          await updateJobProgress(jobId, 80, "生成图表", "图表渲染完成，正在保存文件");
 
           for (const { name, svg } of svgs) {
             const storageKey = `workspaces/${workspaceId}/charts/${name}.svg`;
@@ -394,7 +984,16 @@ ${projectContext}
 
           await db.taskJob.update({
             where: { id: jobId },
-            data: { status: "COMPLETED", progress: 100, result: { chartCount: svgs.length } },
+            data: {
+              status: "COMPLETED",
+              progress: 100,
+              result: {
+                stage: "图表生成完成",
+                detail: `共生成 ${svgs.length} 张图`,
+                model: WORKER_MODEL_ID,
+                chartCount: svgs.length,
+              },
+            },
           });
 
           await db.notification.create({
@@ -411,7 +1010,16 @@ ${projectContext}
         case "preview": {
           await db.taskJob.update({
             where: { id: jobId },
-            data: { status: "COMPLETED", progress: 100, result: { message: "预览功能已就绪" } },
+            data: {
+              status: "COMPLETED",
+              progress: 100,
+              result: {
+                stage: "预览准备完成",
+                detail: "预览功能已就绪",
+                model: WORKER_MODEL_ID,
+                message: "预览功能已就绪",
+              },
+            },
           });
           break;
         }
@@ -424,7 +1032,15 @@ ${projectContext}
       console.error(`[Worker] Job ${jobId} failed:`, message);
       await db.taskJob.update({
         where: { id: jobId },
-        data: { status: "FAILED", error: message },
+        data: {
+          status: "FAILED",
+          error: message,
+          result: {
+            stage: "任务失败",
+            detail: message,
+            model: WORKER_MODEL_ID,
+          },
+        },
       });
       throw err;
     }

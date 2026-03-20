@@ -18,6 +18,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
     "worker:dev": "tsx --watch --watch-path=worker --watch-path=lib worker/index.ts",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
@@ -42,6 +46,7 @@
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-tooltip": "^1.2.8",
     "ai": "^6.0.116",
+    "ali-oss": "^6.23.0",
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.71.0",
     "class-variance-authority": "^0.7.1",
@@ -54,6 +59,7 @@
     "next": "^16.1.6",
     "next-auth": "^4.24.13",
     "prisma": "^6.19.2",
+    "proxy-agent": "^5.0.0",
     "radix-ui": "^1.4.3",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
@@ -63,17 +69,24 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@tailwindcss/postcss": "^4.2.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/ali-oss": "^6.23.3",
     "@types/bcryptjs": "^3.0.0",
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@vitest/coverage-v8": "^4.1.0",
     "eslint": "^10.0.3",
     "eslint-config-next": "^16.1.6",
+    "jsdom": "^29.0.0",
     "pg": "^8.20.0",
     "postcss": "^8.5.8",
     "tailwindcss": "^4.2.1",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
   }
 }

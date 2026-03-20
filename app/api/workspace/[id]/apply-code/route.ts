@@ -1,10 +1,7 @@
 import { db } from "@/lib/db";
 import { success, error } from "@/lib/api-response";
 import { requireAuth } from "@/lib/auth-helpers";
-import * as fs from "fs/promises";
-import * as path from "path";
-
-const STORAGE_DIR = path.join(process.cwd(), ".storage");
+import { uploadFile } from "@/lib/storage/oss";
 
 export async function POST(
   req: Request,
@@ -27,14 +24,7 @@ export async function POST(
   }
 
   const storageKey = `workspaces/${id}/code/${filePath}`;
-  const diskPath = path.join(STORAGE_DIR, storageKey);
-  const resolved = path.resolve(diskPath);
-  if (!resolved.startsWith(path.resolve(STORAGE_DIR))) {
-    return error("非法路径", 403);
-  }
-
-  await fs.mkdir(path.dirname(resolved), { recursive: true });
-  await fs.writeFile(resolved, content, "utf-8");
+  await uploadFile(storageKey, content);
 
   const fileSize = Buffer.byteLength(content);
 

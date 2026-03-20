@@ -1,10 +1,7 @@
 import { db } from "@/lib/db";
 import { success, error } from "@/lib/api-response";
 import { requireAuth } from "@/lib/auth-helpers";
-import * as fs from "fs/promises";
-import * as path from "path";
-
-const STORAGE_DIR = path.join(process.cwd(), ".storage");
+import { downloadFile } from "@/lib/storage/oss";
 
 export async function GET(
   _req: Request,
@@ -29,12 +26,7 @@ export async function GET(
 
   let content = "";
   try {
-    const filePath = path.join(STORAGE_DIR, file.storageKey);
-    const resolved = path.resolve(filePath);
-    if (!resolved.startsWith(path.resolve(STORAGE_DIR))) {
-      return error("非法路径", 403);
-    }
-    const buf = await fs.readFile(resolved);
+    const buf = await downloadFile(file.storageKey);
     if (file.path.endsWith(".docx")) {
       content = "[二进制文件，请下载查看]";
     } else {

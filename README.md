@@ -133,6 +133,23 @@ pnpm worker:dev
 | `pnpm build` | 构建生产版本 |
 | `pnpm start` | 启动生产服务器 |
 
+## 浏览器全链路实测（Live）
+
+该项目已内置 Playwright 全链路用例：`e2e/full-flow.live.spec.ts`  
+覆盖流程：注册 → 创建工作空间 → 生成代码 → 生成论文 → 预览 → 下载。
+
+运行前请确保：
+- `pnpm dev` 可正常启动
+- `pnpm worker:dev` 已启动（必须）
+- `.env.local` 中 AI / DB / Redis 配置完整
+
+PowerShell 执行：
+
+```powershell
+$env:E2E_LIVE="1"
+npx pnpm exec playwright test e2e/full-flow.live.spec.ts
+```
+
 ## 数据库模型
 
 | 模型 | 说明 |
@@ -152,11 +169,12 @@ pnpm worker:dev
 
 1. 用户注册/登录（邮箱 或 手机号）
 2. 创建工作空间（AI 推荐选题 → 选技术栈 → 生成需求清单）
-3. 点击"生成代码" → BullMQ 队列 → Worker 调用 AI → 代码存入 .storage/
-4. 点击"生成论文" → Worker 自动生成图表（ER图/架构图/用例图，Mermaid→SVG→PNG）+ AI 撰写 9 章 → 图表/表格自动嵌入 → 输出 DOCX
-5. 点击"预览" → 运行预览（自动构建前端界面 + 示例数据）或文件浏览（源码/论文/图表）
-6. AI 对话修改代码 → 输入指令 → AI 给出修改方案 → 一键应用到项目文件
-7. 下载压缩包，按本地运行指南部署
+3. 进入工作空间后先做“功能确认闸门”：确认当前需求或输入修改想法，由 AI 重分析并先完成难度评估
+4. 点击"生成代码" → BullMQ 队列 → Worker 调用 AI → 代码存入存储层（本地/OSS）
+5. 点击"生成论文" → Worker 自动生成图表（ER图/架构图/用例图，Mermaid→SVG→PNG）+ AI 撰写 9 章 → 图表/表格自动嵌入 → 输出 DOCX
+6. 点击"预览" → 运行预览（自动构建前端界面 + 示例数据）或文件浏览（源码/论文/图表）
+7. AI 对话修改代码 → 输入指令 → AI 给出修改方案 → 一键应用到项目文件
+8. 下载压缩包，按本地运行指南部署
 
 ## 常见问题
 
@@ -181,3 +199,22 @@ pnpm dev
 docker compose up -d
 docker compose ps  # 确认 postgres 和 redis 都是 Running
 ```
+## Token Quota (Phase 1)
+
+当前版本支持“按用户总 Token 额度”控制成本，不依赖前端模型下拉。
+
+- 固定模型（Worker）:
+  - `CODE_GEN_MODEL_ID=deepseek`
+  - `THESIS_GEN_MODEL_ID=glm`
+- 免费额度:
+  - `DEFAULT_USER_TOKEN_BUDGET=500000`
+- 任务入队预留:
+  - `CODE_GEN_TOKEN_RESERVE=120000`
+  - `THESIS_GEN_TOKEN_RESERVE=220000`
+
+实现说明:
+
+- 代码生成、论文生成、AI 对话都会记录 `AiUsageLog` 的 `inputTokens/outputTokens`。
+- 系统按用户历史 `AiUsageLog` 聚合计算 `tokenUsed`，并与 `DEFAULT_USER_TOKEN_BUDGET` 比较。
+- 当余额不足时，接口会返回 `402`，任务不会进入队列。
+- 下载能力一期保持开放，不做下载拦截。

@@ -2,13 +2,10 @@ import { streamText } from "ai";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth-helpers";
 import { selectModel } from "@/lib/ai/router";
-import { recordUsage } from "@/lib/ai/usage";
+import { ensureUserTokenQuota, recordUsage } from "@/lib/ai/usage";
 import { getSystemPrompt } from "@/lib/ai/prompts";
+import { downloadFile } from "@/lib/storage/oss";
 import type { AiTaskType } from "@prisma/client";
-import * as fs from "fs/promises";
-import * as path from "path";
-
-const STORAGE_DIR = path.join(process.cwd(), ".storage");
 
 async function buildProjectContext(workspaceId: string): Promise<string> {
   const workspace = await db.workspace.findUnique({ where: { id: workspaceId } });
@@ -16,7 +13,9 @@ async function buildProjectContext(workspaceId: string): Promise<string> {
 
   const techStack = workspace.techStack as Record<string, string>;
   const requirements = workspace.requirements as Record<string, unknown>;
-  const techStr = Object.entries(techStack).map(([k, v]) => `${k}: ${v}`).join(", ");
+  const techStr = Object.entries(techStack)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join(", ");
 
   let context = `\n\n--- 项目上下文 ---\n`;
   context += `项目名称：${workspace.name}\n`;
@@ -27,13 +26,15 @@ async function buildProjectContext(workspaceId: string): Promise<string> {
     context += `项目描述：${requirements.summary}\n`;
   }
   if (Array.isArray(requirements?.roles)) {
-    context += `系统角色：${(requirements.roles as { name: string }[]).map(r => r.name).join("、")}\n`;
+    context += `系统角色：${(requirements.roles as { name: string }[])
+      .map((r) => r.name)
+      .join("、")}\n`;
   }
   if (Array.isArray(requirements?.modules)) {
-    const mods = requirements.modules as { name: string; features: string[] }[];
+    const modules = requirements.modules as { name: string; features: string[] }[];
     context += `功能模块：\n`;
-    for (const m of mods) {
-      context += `  - ${m.name}: ${m.features.join("、")}\n`;
+    for (const mod of modules) {
+      context += `  - ${mod.name}: ${mod.features.join("、")}\n`;
     }
   }
   if (Array.isArray(requirements?.tables)) {
@@ -52,13 +53,12 @@ async function buildProjectContext(workspaceId: string): Promise<string> {
 
     for (const file of files) {
       if (totalSize > MAX_CONTEXT_SIZE) {
-        context += `\n... 更多文件省略（总计 ${files.length} 个文件）...\n`;
+        context += `\n... 更多文件省略（共 ${files.length} 个）...\n`;
         break;
       }
       try {
-        const filePath = path.join(STORAGE_DIR, file.storageKey);
-        const buf = await fs.readFile(filePath, "utf-8");
-        const content = buf.slice(0, 2000);
+        const buf = await downloadFile(file.storageKey);
+        const content = buf.toString("utf-8").slice(0, 2000);
         context += `\n### 文件: ${file.path}\n\`\`\`\n${content}\n\`\`\`\n`;
         totalSize += content.length;
       } catch {
@@ -85,6 +85,15 @@ export async function POST(req: Request) {
     return new Response("无权限", { status: 403 });
   }
 
+  try {
+    await ensureUserTokenQuota(session!.user.id, 1, "AI 对话");
+  } catch (quotaError) {
+    return new Response(
+      quotaError instanceof Error ? quotaError.message : "Token 额度不足",
+      { status: 402 }
+    );
+  }
+
   const { model, modelId } = await selectModel(
     session!.user.id,
     workspaceId,
@@ -93,18 +102,17 @@ export async function POST(req: Request) {
 
   const basePrompt = getSystemPrompt(taskType as AiTaskType);
   const projectContext = await buildProjectContext(workspaceId);
-
   const systemPrompt = `${basePrompt}${projectContext}
 
 当用户要求修改代码时，请：
 1. 明确指出要修改哪个文件
-2. 给出完整的修改后代码（用代码块包裹，标注文件路径）
+2. 给出完整的修改后代码（用代码块包裹，并标注文件路径）
 3. 解释修改的原因和影响
-4. 如果涉及多个文件的联动修改，按依赖顺序列出`;
+4. 如果涉及多个文件联动，按依赖顺序列出`;
 
   const startTime = Date.now();
-
   const lastUserMessage = messages[messages.length - 1];
+
   if (lastUserMessage?.role === "user") {
     await db.chatMessage.create({
       data: {
@@ -121,6 +129,16 @@ export async function POST(req: Request) {
     messages,
     async onFinish({ text, usage }) {
       const durationMs = Date.now() - startTime;
+      const normalizedUsage = usage as {
+        inputTokens?: number;
+        outputTokens?: number;
+        promptTokens?: number;
+        completionTokens?: number;
+      };
+      const inputTokens =
+        normalizedUsage.inputTokens ?? normalizedUsage.promptTokens ?? 0;
+      const outputTokens =
+        normalizedUsage.outputTokens ?? normalizedUsage.completionTokens ?? 0;
 
       await db.chatMessage.create({
         data: {
@@ -136,8 +154,8 @@ export async function POST(req: Request) {
         workspaceId,
         taskType: taskType as AiTaskType,
         modelId,
-        inputTokens: usage.promptTokens,
-        outputTokens: usage.completionTokens,
+        inputTokens,
+        outputTokens,
         durationMs,
       });
     },

@@ -12,6 +12,20 @@ interface UsageParams {
   durationMs: number;
 }
 
+const FALLBACK_USER_TOKEN_BUDGET = 500_000;
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function getDefaultUserTokenBudget(): number {
+  return parsePositiveInt(
+    process.env.DEFAULT_USER_TOKEN_BUDGET,
+    FALLBACK_USER_TOKEN_BUDGET
+  );
+}
+
 export async function recordUsage(params: UsageParams) {
   const costs = modelCosts[params.modelId];
   const costYuan =
@@ -47,6 +61,43 @@ export async function recordUsage(params: UsageParams) {
   ]);
 
   return costYuan;
+}
+
+export async function getUserTokenSummary(userId: string) {
+  const aggregated = await db.aiUsageLog.aggregate({
+    where: { userId },
+    _sum: {
+      inputTokens: true,
+      outputTokens: true,
+    },
+  });
+
+  const inputTokens = aggregated._sum.inputTokens ?? 0;
+  const outputTokens = aggregated._sum.outputTokens ?? 0;
+  const tokenUsed = inputTokens + outputTokens;
+  const tokenBudget = getDefaultUserTokenBudget();
+
+  return {
+    tokenBudget,
+    tokenUsed,
+    tokenRemaining: Math.max(0, tokenBudget - tokenUsed),
+    inputTokens,
+    outputTokens,
+  };
+}
+
+export async function ensureUserTokenQuota(
+  userId: string,
+  reserveTokens: number,
+  taskLabel = "当前操作"
+) {
+  const summary = await getUserTokenSummary(userId);
+  if (summary.tokenRemaining < reserveTokens) {
+    throw new Error(
+      `${taskLabel}所需 Token 不足。当前剩余 ${summary.tokenRemaining}，至少需要 ${reserveTokens}。`
+    );
+  }
+  return summary;
 }
 
 export async function getQuotaStatus(userId: string, workspaceId: string) {

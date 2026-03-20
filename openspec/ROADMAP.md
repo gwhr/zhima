@@ -1,6 +1,6 @@
 # 智码 ZhiMa - 开发路线图
 
-> 最后更新: 2026-03-16
+> 最后更新: 2026-03-19
 
 ## 项目简介
 
@@ -14,61 +14,63 @@
 
 | # | 模块 | Change 目录 | 状态 | 说明 |
 |---|------|-------------|------|------|
-| 1 | 项目初始化 | `project-init` | ✅ | Next.js 16 + pnpm + Docker Compose |
-| 2 | 邮箱注册登录 | `user-system` | ✅ | NextAuth.js v4 + bcrypt |
-| 3 | 手机号注册登录 | `phone-auth` | ✅ | 短信验证码 + 双登录方式 |
-| 4 | 工作空间管理 | `workspace-management` | ✅ | CRUD + 多步骤创建向导 |
-| 5 | AI 模型调度 | `ai-dispatcher` | ✅ | 多模型路由（Claude/DeepSeek/GLM）|
-| 6 | Prompt 工程 | `prompt-engineering` | ✅ | 题目推荐 + 需求拆解 prompts |
-| 7 | AI 对话系统 | `chat-system` | ✅ | 流式 SSE 对话 |
-| 8 | 计费系统 | `billing-system` | ✅ | 套餐定义 + 配额管理 |
-| 9 | 支付系统 | `payment-system` | ✅ | 虎皮椒集成 + Webhook |
+| 1 | 项目初始化 | `archive/2026-03-19-core-stable/project-init` | ✅ | Next.js 16 + pnpm + Docker Compose |
+| 2 | 邮箱注册登录 | `archive/2026-03-19-core-stable/user-system` | ✅ | NextAuth.js v4 + bcrypt |
+| 3 | 手机号注册登录 | `archive/2026-03-19-roadmap-done/phone-auth` | ✅ | 短信验证码 + 双登录方式 |
+| 4 | 工作空间管理 | `archive/2026-03-19-core-stable/workspace-management` | ✅ | CRUD + 多步骤创建向导 |
+| 5 | AI 模型调度 | `archive/2026-03-19-roadmap-done/ai-dispatcher` | ✅ | 多模型路由（Claude/DeepSeek/GLM）|
+| 6 | Prompt 工程 | `archive/2026-03-19-roadmap-done/prompt-engineering` | ✅ | 题目推荐 + 需求拆解 prompts |
+| 7 | AI 对话系统 | `archive/2026-03-19-core-stable/chat-system` | ✅ | 流式 SSE 对话 |
+| 8 | 计费系统 | `archive/2026-03-19-roadmap-done/billing-system` | ✅ | 套餐定义 + 配额管理 |
+| 9 | 支付系统 | `archive/2026-03-19-roadmap-done/payment-system` | ✅ | 虎皮椒集成 + Webhook |
 
 ### 核心功能
 
 | # | 模块 | Change 目录 | 状态 | 说明 |
 |---|------|-------------|------|------|
-| 10 | 代码生成 | `worker-logic` | ✅ | BullMQ Worker + AI 代码生成 |
-| 11 | 论文生成 | `thesis-generator` | ✅ | 9章节论文(含参考文献+致谢) + 封面目录 + 图表嵌入 + 表格嵌入 + DOCX 导出 |
-| 12 | 图表渲染 | `chart-renderer` | ✅ | 需求数据 → Mermaid → Kroki SVG → Sharp PNG → 嵌入论文 |
-| 13 | 文件管理 | `file-management` | ✅ | 本地存储模拟 (.storage/) |
-| 14 | 文件预览 | `code-preview` | ✅ | 代码/论文文件浏览 + 语言识别 + 复制 |
-| 15 | 运行预览 | `preview-build` | ✅ | 基于需求自动构建前端页面 + iframe 沙盒渲染 + 示例数据 |
-| 16 | AI 代码修改 | `ai-code-modify` | ✅ | 对话指令修改代码 + 一键应用 + 模糊文件匹配 + 新建文件 |
+| 10 | 代码生成 | `archive/2026-03-19-roadmap-done/worker-logic` | ✅ | BullMQ Worker + AI 代码生成 |
+| 11 | 论文生成 | `archive/2026-03-19-roadmap-done/thesis-generator` | ✅ | 9章节论文(含参考文献+致谢) + 封面目录 + 图表嵌入 + 表格嵌入 + DOCX 导出 |
+| 12 | 图表渲染 | `archive/2026-03-19-roadmap-done/chart-renderer` | ✅ | 需求数据 → Mermaid → Kroki SVG → Sharp PNG → 嵌入论文 |
+| 13 | 文件管理 | `archive/2026-03-19-roadmap-done/file-management` | ✅ | 本地存储模拟 (.storage/) |
+| 14 | 文件预览 | `archive/2026-03-19-roadmap-done/code-preview` | ✅ | 代码/论文文件浏览 + 语言识别 + 复制 |
+| 15 | 运行预览 | `archive/2026-03-19-roadmap-done/preview-build` | ✅ | 基于需求自动构建前端页面 + iframe 沙盒渲染 + 示例数据 |
+| 16 | AI 代码修改 | `archive/2026-03-19-roadmap-done/ai-code-modify` | ✅ | 对话指令修改代码 + 一键应用 + 模糊文件匹配 + 新建文件 |
 
 ### 前端体验
 
 | # | 模块 | Change 目录 | 状态 | 说明 |
 |---|------|-------------|------|------|
-| 17 | 营销首页 | `ui-polish` | ✅ | Hero + 功能 + 定价 + FAQ |
-| 18 | 登录/注册 | `ui-polish` | ✅ | 双栏布局 + 邮箱/手机号切换 |
-| 19 | Dashboard | `ui-polish` | ✅ | 统计卡片 + 快捷入口 |
-| 20 | 工作空间详情 | `ui-polish` | ✅ | 项目概览(角色/模块/表) + 步骤引导操作 + 下载卡片 + 本地运行指南 |
-| 21 | 创建项目向导 | `ui-polish` | ✅ | 5步流程(关键词→选题→技术栈→需求→确认) + AI loading 提示 |
-| 22 | 项目预览弹窗 | `ui-polish` | ✅ | 双Tab(运行预览+文件浏览) + 全屏展示 + 示例数据说明 |
-| 23 | AI 对话面板 | `ui-polish` | ✅ | 流式对话 + Markdown 渲染 + 代码块高亮 + 一键应用修改 |
-| 24 | 通知系统 | `notification-frontend` | ✅ | 铃铛 + 面板 + 已读标记 |
-| 25 | 管理后台 | `admin-frontend` | ✅ | 数据看板 + 用户管理 + 订单管理 |
-| 26 | 错误页面 | `ui-polish` | ✅ | 403/404/500 自定义页面 |
+| 17 | 营销首页 | `archive/2026-03-19-roadmap-done/ui-polish` | ✅ | Hero + 功能 + 定价 + FAQ |
+| 18 | 登录/注册 | `archive/2026-03-19-roadmap-done/ui-polish` | ✅ | 双栏布局 + 邮箱/手机号切换 |
+| 19 | Dashboard | `archive/2026-03-19-roadmap-done/ui-polish` | ✅ | 统计卡片 + 快捷入口 |
+| 20 | 工作空间详情 | `archive/2026-03-19-roadmap-done/ui-polish` | ✅ | 项目概览(角色/模块/表) + 步骤引导操作 + 下载卡片 + 本地运行指南 |
+| 21 | 创建项目向导 | `archive/2026-03-19-roadmap-done/ui-polish` | ✅ | 5步流程(关键词→选题→技术栈→需求→确认) + AI loading 提示 |
+| 22 | 项目预览弹窗 | `archive/2026-03-19-roadmap-done/ui-polish` | ✅ | 双Tab(运行预览+文件浏览) + 全屏展示 + 示例数据说明 |
+| 23 | AI 对话面板 | `archive/2026-03-19-roadmap-done/ui-polish` | ✅ | 流式对话 + Markdown 渲染 + 代码块高亮 + 一键应用修改 |
+| 24 | 通知系统 | `archive/2026-03-19-roadmap-done/notification-frontend` | ✅ | 铃铛 + 面板 + 已读标记 |
+| 25 | 管理后台 | `archive/2026-03-19-roadmap-done/admin-frontend` | ✅ | 数据看板 + 用户管理 + 订单管理 |
+| 26 | 错误页面 | `archive/2026-03-19-roadmap-done/ui-polish` | ✅ | 403/404/500 自定义页面 |
 
 ### 部署相关
 
 | # | 模块 | Change 目录 | 状态 | 说明 |
 |---|------|-------------|------|------|
-| 27 | Docker 镜像 | `deployment` | ✅ | Dockerfile + Dockerfile.worker |
-| 28 | 生产 Compose | `deployment` | ✅ | docker-compose.prod.yml + Nginx |
-| 29 | 邀请码系统 | `referral-system` | ✅ | 生成/使用/奖励 |
+| 27 | Docker 镜像 | `archive/2026-03-19-roadmap-done/deployment` | ✅ | Dockerfile + Dockerfile.worker |
+| 28 | 生产 Compose | `archive/2026-03-19-roadmap-done/deployment` | ✅ | docker-compose.prod.yml + Nginx |
+| 29 | 邀请码系统 | `archive/2026-03-19-roadmap-done/referral-system` | ✅ | 生成/使用/奖励 |
+| 30 | OSS 集成（阶段一） | `archive/2026-03-19-oss-complete/oss-integration` | ✅ | ZIP 打包下载 + 论文模板上传（本地存储模式） |
 
-### API 骨架（待丰富）
+### 后期模块骨架（已归档）
 
 | # | 模块 | Change 目录 | 状态 |
 |---|------|-------------|------|
-| 25 | 容器管理 | `container-management` | 📋 骨架 |
-| 26 | SEO 落地页 | `seo-landing-pages` | 📋 骨架 |
-| 27 | 推广内容 | `promo-content-gen` | 📋 骨架 |
-| 28 | 推广数据 | `promo-dashboard` | 📋 骨架 |
-| 29 | 多平台发布 | `multi-platform-publish` | 📋 骨架 |
-| 30 | 视频制作 | `video-production` | 📋 骨架 |
+| 30 | 测试体系 | `archive/2026-03-19-skeleton-complete/testing` | ✅ |
+| 31 | 容器管理 | `archive/2026-03-19-skeleton-complete/container-management` | ✅ 骨架 |
+| 32 | SEO 落地页 | `archive/2026-03-19-skeleton-complete/seo-landing-pages` | ✅ 骨架 |
+| 33 | 推广内容 | `archive/2026-03-19-skeleton-complete/promo-content-gen` | ✅ 骨架 |
+| 34 | 推广数据 | `archive/2026-03-19-skeleton-complete/promo-dashboard` | ✅ 骨架 |
+| 35 | 多平台发布 | `archive/2026-03-19-skeleton-complete/multi-platform-publish` | ✅ 骨架 |
+| 36 | 视频制作 | `archive/2026-03-19-skeleton-complete/video-production` | ✅ 骨架 |
 
 ---
 
@@ -78,24 +80,24 @@
 
 | 任务 | 所属模块 | 说明 |
 |------|----------|------|
-| ~~ZIP 打包下载 API~~ | `oss-integration` | ✅ 已完成：/api/workspace/[id]/download，支持 code/thesis/chart/all |
-| 生成代码质量优化 | `worker-logic` | 优化 prompt，确保生成代码可直接运行 |
+| ~~ZIP 打包下载 API~~ | `archive/2026-03-19-oss-complete/oss-integration` | ✅ 已完成：/api/workspace/[id]/download，支持 code/thesis/chart/all |
+| ~~生成代码质量优化~~ | `archive/2026-03-19-roadmap-done/worker-logic` | ✅ 已完成：code-gen prompt 升级 + 路径清洗/去重 + README 兜底 + 最少文件校验 |
+| ~~功能确认闸门（新增）~~ | `archive/2026-03-19-feature-confirmation-gate/feature-confirmation-gate` | ✅ 已完成：工作空间详情页新增“功能确认闸门”，支持修改想法→AI 重分析→难度评估→再生成代码 |
 
 ### P1 - 体验优化
 
 | 任务 | 所属模块 | 说明 |
 |------|----------|------|
-| 论文模板上传 | `oss-integration` | /api/workspace/[id]/upload-template |
-| 真实 OSS 接入 | `oss-integration` | 配置阿里云 OSS SDK 替换本地存储 |
-| 测试框架搭建 | `testing` | Vitest + Playwright E2E |
+| ~~论文模板上传~~ | `archive/2026-03-19-oss-complete/oss-integration` | ✅ 已完成：/api/workspace/[id]/upload-template（浏览器上传已验证） |
+| 真实 OSS 接入 | `archive/2026-03-19-oss-complete/oss-integration` | 配置阿里云 OSS SDK 替换本地存储（生产环境） |
 
 ### P2 - 上线部署
 
 | 任务 | 所属模块 | 说明 |
 |------|----------|------|
-| 数据库备份脚本 | `deployment` | scripts/backup.sh |
-| 部署文档 | `deployment` | docs/deployment.md |
-| 域名 + HTTPS | `deployment` | Nginx SSL 配置 |
+| 数据库备份脚本 | `archive/2026-03-19-roadmap-done/deployment` | scripts/backup.sh |
+| 部署文档 | `archive/2026-03-19-roadmap-done/deployment` | docs/deployment.md |
+| 域名 + HTTPS | `archive/2026-03-19-roadmap-done/deployment` | Nginx SSL 配置 |
 
 ---
 
@@ -117,7 +119,7 @@
 ## 文件统计
 
 - 应用页面: 13
-- API 路由: 31
+- API 路由: 32
 - 业务组件: 8（预览弹窗、AI 对话、消息渲染、创建向导等）
 - UI 基础组件: 15（shadcn/ui）
 - 工具库: 30
@@ -131,6 +133,7 @@
 
 | 日期 | 问题 | 修复 |
 |------|------|------|
+| 03-19 | 代码生成路径不稳定，易出现 `generated_xxx` 无目录文件 | Worker 增加规范提示词 + 结果后处理（路径清洗、命名规整、README 兜底、最少文件校验） |
 | 03-16 | Worker 不消费任务 | API 路由缺少 `taskQueue.add()` 调用，新建 `lib/queue.ts` |
 | 03-16 | Worker 读不到新 API Key | Worker 用 `dotenv/config` 只读 `.env`，改为先加载 `.env.local` |
 | 03-16 | 智谱 API 返回 404 | AI SDK v6 默认走 `/responses`，改用 `.chat()` 方法走 `/chat/completions` |
@@ -157,3 +160,4 @@
 | 6 | 下载功能 | ✅ 三类文件分别打包下载 |
 
 > **流程简化（03-16）**: 移除独立"生成图表"步骤，图表在论文生成时自动完成。UI 从 4 步简化为 3 步：生成代码 → 生成论文（含图表） → 预览 & 下载。
+

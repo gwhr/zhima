@@ -1,11 +1,9 @@
 import { db } from "@/lib/db";
 import { error } from "@/lib/api-response";
 import { requireAuth } from "@/lib/auth-helpers";
+import { downloadFile } from "@/lib/storage/oss";
+import type { FileType } from "@prisma/client";
 import JSZip from "jszip";
-import * as fs from "fs/promises";
-import * as path from "path";
-
-const STORAGE_DIR = path.join(process.cwd(), ".storage");
 
 // type 参数: code | thesis | chart | all
 export async function GET(
@@ -25,12 +23,11 @@ export async function GET(
     return error("无权限", 403);
   }
 
-  // 根据 type 筛选文件
-  const typeMap: Record<string, string[]> = {
-    code:   ["CODE"],
+  const typeMap: Record<string, FileType[]> = {
+    code: ["CODE"],
     thesis: ["THESIS"],
-    chart:  ["CHART"],
-    all:    ["CODE", "THESIS", "CHART"],
+    chart: ["CHART"],
+    all: ["CODE", "THESIS", "CHART"],
   };
   const allowedTypes = typeMap[type] ?? typeMap.all;
 
@@ -48,15 +45,9 @@ export async function GET(
 
   for (const file of files) {
     try {
-      const filePath = path.join(STORAGE_DIR, file.storageKey);
-      const resolved = path.resolve(filePath);
-      if (!resolved.startsWith(path.resolve(STORAGE_DIR))) continue;
-
-      const buf = await fs.readFile(resolved);
-      // 在 ZIP 内按 type 分目录存放
-      const zipPath = type === "all"
-        ? `${file.type.toLowerCase()}/${file.path}`
-        : file.path;
+      const buf = await downloadFile(file.storageKey);
+      const zipPath =
+        type === "all" ? `${file.type.toLowerCase()}/${file.path}` : file.path;
       zip.file(zipPath, buf);
       addedCount++;
     } catch {
@@ -74,16 +65,21 @@ export async function GET(
     compressionOptions: { level: 6 },
   });
 
-  const filenameSuffix = type === "all" ? "全部文件" : {
-    code: "项目源代码",
-    thesis: "毕业论文",
-    chart: "图表文件",
-  }[type] ?? type;
+  const filenameSuffix =
+    type === "all"
+      ? "全部文件"
+      : {
+          code: "项目源码",
+          thesis: "毕业论文",
+          chart: "图表文件",
+        }[type] ?? type;
 
-  const projectName = workspace.name.replace(/[^\w\u4e00-\u9fff]/g, "_").slice(0, 30);
+  const projectName = workspace.name
+    .replace(/[^\w\u4e00-\u9fff]/g, "_")
+    .slice(0, 30);
   const filename = `${projectName}_${filenameSuffix}.zip`;
 
-  return new Response(zipBuffer, {
+  return new Response(new Uint8Array(zipBuffer), {
     headers: {
       "Content-Type": "application/zip",
       "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,

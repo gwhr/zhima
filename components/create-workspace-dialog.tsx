@@ -66,6 +66,12 @@ interface ExpandedRequirements {
 }
 
 type Step = "keyword" | "pick-topic" | "tech-stack" | "requirements" | "confirm";
+type MajorCategory = "computer" | "non-computer";
+
+const majorCategoryLabels: Record<MajorCategory, string> = {
+  computer: "计算机相关专业",
+  "non-computer": "非计算机专业",
+};
 
 const searchHints = [
   "正在检索毕设题目库...",
@@ -101,6 +107,7 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
   const [customTopic, setCustomTopic] = useState("");
 
   // Step 3: tech stack
+  const [majorCategory, setMajorCategory] = useState<MajorCategory>("computer");
   const [backend, setBackend] = useState("java-springboot");
   const [database, setDatabase] = useState("mysql");
   const [frontend, setFrontend] = useState("vue3");
@@ -115,6 +122,7 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
     setSuggestions([]);
     setSelectedTopic("");
     setCustomTopic("");
+    setMajorCategory("computer");
     setBackend("java-springboot");
     setDatabase("mysql");
     setFrontend("vue3");
@@ -153,7 +161,7 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
       const res = await fetch("/api/ai/recommend-topics", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keyword }),
+        body: JSON.stringify({ keyword, majorCategory }),
       });
       const data = await res.json();
       if (data.success && data.data.length > 0) {
@@ -181,6 +189,7 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           topic: finalTopic,
+          majorCategory,
           techStack: { backend, database, frontend },
         }),
       });
@@ -226,6 +235,8 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
             roles: requirements?.roles,
             modules: enabledModules,
             tables: requirements?.tables,
+            majorCategory,
+            majorCategoryLabel: majorCategoryLabels[majorCategory],
           },
         }),
       });
@@ -417,6 +428,32 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
           <div className="space-y-4">
             <div className="rounded-lg bg-muted/50 p-3">
               <p className="text-sm font-medium">选题：{finalTopic}</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>专业分类</Label>
+              <Select
+                value={majorCategory}
+                onValueChange={(value) => setMajorCategory(value as MajorCategory)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="computer">计算机相关专业（推荐）</SelectItem>
+                  <SelectItem value="non-computer">非计算机专业</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                当前系统以“信息系统/软件类毕设”最稳定，非计算机专业会自动偏向业务信息化题目。
+              </p>
+              {majorCategory === "non-computer" && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5">
+                  <p className="text-xs text-amber-700">
+                    已切换为非计算机专业模式：我们会优先生成更易答辩、工程复杂度更低的系统型方案。
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">

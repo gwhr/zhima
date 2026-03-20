@@ -25,6 +25,7 @@ export async function GET(
       type: true,
       status: true,
       progress: true,
+      result: true,
       error: true,
       createdAt: true,
       updatedAt: true,

@@ -6,14 +6,28 @@ export async function POST(req: Request) {
   const { error: authError } = await requireAuth();
   if (authError) return authError;
 
-  const { keyword } = await req.json();
+  const body = await req.json();
+  const keyword = typeof body?.keyword === "string" ? body.keyword.trim() : "";
+  const majorCategory =
+    body?.majorCategory === "non-computer" ? "non-computer" : "computer";
+
   if (!keyword) {
     return Response.json({ success: false, error: "请输入关键词" }, { status: 400 });
   }
 
+  const categoryPrompt =
+    majorCategory === "non-computer"
+      ? `
+专业分类：非计算机专业。
+请优先推荐“业务信息化系统”方向题目（如管理系统、数据分析看板、流程平台、小程序），确保实现复杂度适中，适合非计算机背景同学完成与答辩。`
+      : `
+专业分类：计算机相关专业。
+可以覆盖常见软件工程方向题目，兼顾工程实践与技术深度。`;
+
   const { text } = await generateText({
     model: models.glm,
     prompt: `你是毕业设计选题专家。用户输入了方向关键词："${keyword}"
+${categoryPrompt}
 
 请推荐 6 个适合本科毕业设计的题目。严格按以下 JSON 格式返回，不要有任何多余文字：
 

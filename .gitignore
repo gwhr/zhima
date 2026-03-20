@@ -32,6 +32,12 @@ yarn-error.log*
 # local file storage (dev mode OSS simulation)
 .storage/
 
+# test artifacts
+coverage/
+playwright-report/
+test-results/
+.tmp/
+
 # vercel
 .vercel
 

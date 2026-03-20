@@ -6,18 +6,32 @@ type QuotaStage = "normal" | "tightened" | "economy" | "exceeded";
 
 const modelMatrix: Record<QuotaStage, Partial<Record<AiTaskType, ModelId>>> = {
   normal: {
-    CODE_GEN: "opus",
-    CHART: "opus",
-    MODIFY_COMPLEX: "opus",
+    CODE_GEN: "deepseek",
+    THESIS: "glm",
+    CHART: "glm",
+    MODIFY_COMPLEX: "deepseek",
   },
   tightened: {
-    CODE_GEN: "opus",
+    CODE_GEN: "glm",
+    THESIS: "glm",
+    CHART: "glm",
+    MODIFY_COMPLEX: "glm",
   },
-  economy: {},
-  exceeded: {},
+  economy: {
+    CODE_GEN: "glm",
+    THESIS: "glm",
+    CHART: "glm",
+    MODIFY_COMPLEX: "glm",
+  },
+  exceeded: {
+    CODE_GEN: "glm",
+    THESIS: "glm",
+    CHART: "glm",
+    MODIFY_COMPLEX: "glm",
+  },
 };
 
-const defaultModel: ModelId = "glm";
+const defaultModel: ModelId = "deepseek";
 
 export function getQuotaStage(used: number, budget: number): QuotaStage {
   if (budget <= 0) return "normal";
@@ -41,10 +55,6 @@ export async function selectModel(
     ? getQuotaStage(Number(quota.opusUsed), Number(quota.opusBudget))
     : "normal";
 
-  if (stage === "exceeded") {
-    throw new Error("额度已用完，请升级套餐");
-  }
-
   const stageMatrix = modelMatrix[stage];
   const modelId = stageMatrix[taskType] || defaultModel;
 
@@ -54,3 +64,4 @@ export async function selectModel(
     stage,
   };
 }
+

@@ -78,3 +78,34 @@ function downloadFiles(type) {
 ```
 
 四个下载入口：右侧卡片（代码/论文/图表各一个） + 步骤 3（下载全部）。
+
+---
+
+## 论文模板上传（已实现，2026-03-19）
+
+### 接口
+
+```
+POST /api/workspace/[id]/upload-template
+Content-Type: multipart/form-data
+field: file
+```
+
+### 约束
+
+- 仅允许 `.doc` / `.docx`
+- 文件大小 <= 10MB
+- 使用 `workspaceId + 固定路径` 覆盖同一工作空间的旧模板
+
+### 存储
+
+- 磁盘路径：`.storage/workspaces/{workspaceId}/templates/论文模板.{ext}`
+- 数据库：`workspaceFile`
+- `type = CONFIG`
+- `path = templates/论文模板.{ext}`
+
+### 前端入口
+
+- 工作空间详情右侧“项目文件”卡片新增“论文模板（可选）”
+- 点击“上传模板”后通过 `fetch + FormData` 调用接口
+- 成功后刷新文件列表并展示当前模板文件名/大小

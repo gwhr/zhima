@@ -8,29 +8,31 @@
 ## 目录结构
 
 ```
-__tests__/
+tests/
   ├── unit/
   │   ├── api/           # API 路由测试
-  │   ├── utils/         # 工具函数测试
-  │   └── ai/            # AI router 测试
+  │   ├── lib/           # 工具函数、AI router 测试
   └── integration/
       └── user-flow.test.ts  # 完整用户流程
+
+e2e/
+  └── smoke.spec.ts      # Playwright 冒烟用例
 ```
 
 ## 测试数据库
 
-- 使用 Docker 启动独立 PostgreSQL 容器
-- 测试前执行 `prisma migrate reset`
-- 测试环境 `.env.test`
+- 单元/集成测试使用 mock，不依赖数据库容器
+- e2e 保留真实服务启动能力（playwright webServer）
 
 ## Mock 策略
 
 - AI API: mock 返回固定响应
-- Redis: 使用 ioredis-mock 或真实 Redis 容器
-- OSS: mock 文件存储
+- 认证: mock `requireAuth`
+- 数据库: mock `db` 客户端方法
+- 存储: mock 文件存储能力
 
 ## CI 配置
 
 - GitHub Actions
 - 触发: push / PR 到 main
-- 步骤: 安装依赖 → 启动测试容器 → 运行测试 → 上传覆盖率报告
+- 步骤: 安装依赖 → 运行 Vitest

@@ -1,17 +1,19 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
+import { Textarea } from "@/components/ui/textarea";
 import {
   FileText, Code, BarChart3, Settings, Play,
   Download, ArrowLeft, Loader2,
   Users, Layers, ChevronRight, Info,
-  Package, BookOpen, HelpCircle, Monitor, Terminal, MessageCircle,
+  Package, BookOpen, HelpCircle, Monitor, Terminal, MessageCircle, Upload,
+  CheckCircle2, PencilLine,
 } from "lucide-react";
 import {
   Dialog,
@@ -38,6 +40,31 @@ interface Requirements {
   roles?: RequirementRole[];
   modules?: RequirementModule[];
   tables?: string[];
+  majorCategory?: "computer" | "non-computer";
+  majorCategoryLabel?: string;
+  difficulty?: number;
+  feasibility?: string;
+  estimatedPages?: number;
+  estimatedApis?: number;
+  estimatedTables?: number;
+  estimatedWords?: number;
+  difficultyAssessment?: DifficultyAssessment;
+  featureConfirmed?: boolean;
+  featureConfirmedAt?: string;
+  featureConfirmAction?: "confirm" | "revise";
+  featureConfirmInput?: string;
+  previewConfirmed?: boolean;
+  previewConfirmedAt?: string;
+}
+
+interface DifficultyAssessment {
+  academic: number;
+  practical: number;
+  difficulty: number;
+  workload: string;
+  innovation: number;
+  overall: number;
+  suggestions: string[];
 }
 
 interface WorkspaceDetail {
@@ -63,6 +90,7 @@ interface Job {
   type: string;
   status: string;
   progress: number;
+  result?: Record<string, unknown> | null;
   error: string | null;
   createdAt: string;
 }
@@ -96,8 +124,17 @@ export default function WorkspaceDetailPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState<string | null>(null);
+  const [uploadingTemplate, setUploadingTemplate] = useState(false);
+  const [templateUploadMsg, setTemplateUploadMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [confirmingRequirements, setConfirmingRequirements] = useState(false);
+  const [reviseDialogOpen, setReviseDialogOpen] = useState(false);
+  const [reviseIdea, setReviseIdea] = useState("");
+  const [confirmMsg, setConfirmMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [confirmingPreview, setConfirmingPreview] = useState(false);
+  const [previewMsg, setPreviewMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [showGuide, setShowGuide] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const templateInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadData = useCallback(async () => {
     const [wsRes, filesRes, jobsRes] = await Promise.all([
@@ -148,6 +185,97 @@ export default function WorkspaceDetailPage() {
     document.body.removeChild(a);
   }
 
+  async function uploadTemplate(file: File) {
+    if (!file) return;
+
+    setUploadingTemplate(true);
+    setTemplateUploadMsg(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch(`/api/workspace/${params.id}/upload-template`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || "上传失败");
+      }
+
+      setTemplateUploadMsg({
+        type: "success",
+        text: `模板上传成功：${file.name}`,
+      });
+      await loadData();
+    } catch (err) {
+      setTemplateUploadMsg({
+        type: "error",
+        text: err instanceof Error ? err.message : "上传失败，请稍后重试",
+      });
+    } finally {
+      setUploadingTemplate(false);
+    }
+  }
+
+  async function confirmRequirements(action: "confirm" | "revise", userIdea?: string) {
+    setConfirmingRequirements(true);
+    setConfirmMsg(null);
+
+    try {
+      const res = await fetch(`/api/workspace/${params.id}/confirm-requirements`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, userIdea }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || "功能确认失败");
+      }
+
+      setConfirmMsg({
+        type: "success",
+        text:
+          action === "confirm"
+            ? "功能范围已确认，并已完成难度评估"
+            : "需求已按你的想法更新，并已完成难度评估",
+      });
+      setReviseDialogOpen(false);
+      setReviseIdea("");
+      await loadData();
+    } catch (err) {
+      setConfirmMsg({
+        type: "error",
+        text: err instanceof Error ? err.message : "功能确认失败，请稍后重试",
+      });
+    } finally {
+      setConfirmingRequirements(false);
+    }
+  }
+
+  async function confirmPreviewPassed() {
+    setConfirmingPreview(true);
+    setPreviewMsg(null);
+    try {
+      const res = await fetch(`/api/workspace/${params.id}/confirm-preview`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || "预览确认失败");
+      }
+      setPreviewMsg({ type: "success", text: "预览已确认，可以生成论文了" });
+      await loadData();
+    } catch (err) {
+      setPreviewMsg({
+        type: "error",
+        text: err instanceof Error ? err.message : "预览确认失败，请稍后重试",
+      });
+    } finally {
+      setConfirmingPreview(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full p-6">
@@ -168,6 +296,24 @@ export default function WorkspaceDetailPage() {
   }
 
   const status = statusMap[workspace.status] || statusMap.DRAFT;
+  const majorModeLabel =
+    workspace.requirements?.majorCategoryLabel ||
+    (workspace.requirements?.majorCategory === "non-computer"
+      ? "非计算机专业"
+      : "计算机相关专业");
+  const featureConfirmed = !!workspace.requirements?.featureConfirmed;
+  const difficultyAssessment = workspace.requirements?.difficultyAssessment;
+  const previewConfirmed = !!workspace.requirements?.previewConfirmed;
+  const hasCodeFiles = files.some((f) => f.type === "CODE");
+  const codeGenerationStarted =
+    hasCodeFiles || jobs.some((j) => j.type === "CODE_GEN");
+  const isCodeGenerating =
+    generating === "code" ||
+    jobs.some((j) => j.type === "CODE_GEN" && (j.status === "PENDING" || j.status === "RUNNING"));
+  const hasRunningJob = jobs.some((j) => j.status === "PENDING" || j.status === "RUNNING");
+  const operationLocked = generating !== null || hasRunningJob;
+  const canGenerateThesis =
+    hasCodeFiles && previewConfirmed && !isCodeGenerating && !operationLocked;
 
   const colorMap: Record<string, { bg: string; text: string; progressBg: string }> = {
     blue:   { bg: "bg-blue-100",   text: "text-blue-600",   progressBg: "bg-blue-500" },
@@ -177,8 +323,13 @@ export default function WorkspaceDetailPage() {
   };
 
   function getJobForType(jobType: string) {
-    return jobs.find((j) => j.type === jobType && j.status !== "COMPLETED") ||
-           jobs.find((j) => j.type === jobType);
+    const typedJobs = jobs.filter((j) => j.type === jobType);
+    if (typedJobs.length === 0) return undefined;
+
+    return (
+      typedJobs.find((j) => j.status === "PENDING" || j.status === "RUNNING") ||
+      typedJobs[0]
+    );
   }
 
   function renderStepCard({ step, color, title, desc, jobType, action, disabled }: {
@@ -192,6 +343,16 @@ export default function WorkspaceDetailPage() {
   }) {
     const c = colorMap[color] || colorMap.blue;
     const job = getJobForType(jobType);
+    const jobResult =
+      job?.result && typeof job.result === "object"
+        ? (job.result as Record<string, unknown>)
+        : {};
+    const stageText =
+      typeof jobResult.stage === "string" ? jobResult.stage : "";
+    const detailText =
+      typeof jobResult.detail === "string" ? jobResult.detail : "";
+    const modelText =
+      typeof jobResult.model === "string" ? jobResult.model : "";
     const isRunning = job?.status === "RUNNING" || job?.status === "PENDING";
     const isCompleted = job?.status === "COMPLETED";
     const isFailed = job?.status === "FAILED";
@@ -225,10 +386,16 @@ export default function WorkspaceDetailPage() {
               <div className="mt-2.5 space-y-1">
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-muted-foreground">
-                    {isRunning ? "正在生成中，请稍候..." : ""}
+                    {isRunning ? stageText || "正在生成中，请稍候..." : ""}
                   </span>
                   <span className="font-medium tabular-nums">{job.progress}%</span>
                 </div>
+                {isRunning && detailText && (
+                  <p className="text-[11px] text-muted-foreground">{detailText}</p>
+                )}
+                {modelText && (
+                  <p className="text-[11px] text-muted-foreground">模型: {modelText}</p>
+                )}
                 <div className="h-2 w-full rounded-full bg-gray-100 overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all duration-500 ${isFailed ? "bg-red-500" : c.progressBg} ${isRunning ? "animate-pulse" : ""}`}
@@ -277,8 +444,14 @@ export default function WorkspaceDetailPage() {
                     {workspace.requirements.summary}
                   </p>
                 )}
-                {Object.keys(workspace.techStack).length > 0 && (
+                {(Object.keys(workspace.techStack).length > 0 || majorModeLabel) && (
                   <div className="flex flex-wrap gap-1.5 mt-2">
+                    <Badge
+                      variant="outline"
+                      className="text-xs border-blue-200 bg-blue-50 text-blue-700"
+                    >
+                      专业模式: {majorModeLabel}
+                    </Badge>
                     {Object.entries(workspace.techStack).map(([key, value]) => (
                       <Badge key={key} variant="secondary" className="text-xs">
                         {key}: {value}
@@ -365,6 +538,104 @@ export default function WorkspaceDetailPage() {
             </Card>
           )}
 
+          {/* Feature confirmation gate */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">功能确认</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">
+                先确认功能范围，再进行难度评估，最后再生成代码
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {!featureConfirmed ? (
+                <>
+                  <div className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                    当前尚未确认功能范围。你可以直接确认，或补充想法让 AI 先重分析。
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => confirmRequirements("confirm")}
+                      disabled={confirmingRequirements || codeGenerationStarted}
+                    >
+                      {confirmingRequirements ? (
+                        <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="mr-1.5 h-3 w-3" />
+                      )}
+                      确认当前功能
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setReviseDialogOpen(true)}
+                      disabled={confirmingRequirements || codeGenerationStarted}
+                      className={codeGenerationStarted ? "hidden" : undefined}
+                    >
+                      <PencilLine className="mr-1.5 h-3 w-3" />
+                      我要调整功能
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="rounded-md bg-green-50 px-3 py-2 text-xs text-green-700">
+                    功能范围已确认（
+                    {workspace.requirements?.featureConfirmAction === "revise"
+                      ? "AI 重分析后确认"
+                      : "确认当前功能"}
+                    ）
+                    {workspace.requirements?.featureConfirmedAt
+                      ? ` · ${new Date(workspace.requirements.featureConfirmedAt).toLocaleString("zh-CN")}`
+                      : ""}
+                  </div>
+                  {difficultyAssessment && (
+                    <div className="rounded-md border p-3 space-y-2">
+                      <p className="text-sm font-medium">难度评估</p>
+                      <div className="grid grid-cols-3 gap-2 text-xs">
+                        <div className="rounded bg-muted/40 px-2 py-1">学术性：{difficultyAssessment.academic}</div>
+                        <div className="rounded bg-muted/40 px-2 py-1">实用性：{difficultyAssessment.practical}</div>
+                        <div className="rounded bg-muted/40 px-2 py-1">技术难度：{difficultyAssessment.difficulty}</div>
+                        <div className="rounded bg-muted/40 px-2 py-1">创新性：{difficultyAssessment.innovation}</div>
+                        <div className="rounded bg-muted/40 px-2 py-1">综合分：{difficultyAssessment.overall}</div>
+                        <div className="rounded bg-muted/40 px-2 py-1">工作量：{difficultyAssessment.workload}</div>
+                      </div>
+                      {difficultyAssessment.suggestions?.length > 0 && (
+                        <ul className="text-xs text-muted-foreground list-disc pl-4 space-y-1">
+                          {difficultyAssessment.suggestions.slice(0, 3).map((tip, idx) => (
+                            <li key={idx}>{tip}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setReviseDialogOpen(true)}
+                    disabled={confirmingRequirements || codeGenerationStarted}
+                    className={codeGenerationStarted ? "hidden" : undefined}
+                  >
+                    <PencilLine className="mr-1.5 h-3 w-3" />
+                    重新调整并评估
+                  </Button>
+                </>
+              )}
+
+              {codeGenerationStarted && (
+                <p className="text-xs text-muted-foreground">
+                  代码生成已开始，功能范围已锁定，不能再调整并评估。
+                </p>
+              )}
+
+              {confirmMsg && (
+                <p className={`text-xs ${confirmMsg.type === "success" ? "text-green-600" : "text-red-600"}`}>
+                  {confirmMsg.text}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Actions - Step by step guide */}
           <Card>
             <CardHeader className="pb-3">
@@ -382,7 +653,7 @@ export default function WorkspaceDetailPage() {
                   <Button
                     size="sm"
                     onClick={() => triggerGenerate("code")}
-                    disabled={generating !== null}
+                    disabled={operationLocked || !featureConfirmed}
                     className="shrink-0"
                   >
                     {generating === "code" ? (
@@ -406,7 +677,7 @@ export default function WorkspaceDetailPage() {
                     size="sm"
                     variant="outline"
                     onClick={() => triggerGenerate("thesis")}
-                    disabled={generating !== null}
+                    disabled={!canGenerateThesis}
                     className="shrink-0"
                   >
                     {generating === "thesis" ? (
@@ -425,25 +696,74 @@ export default function WorkspaceDetailPage() {
                 title: "预览代码 & 下载",
                 desc: "查看所有生成的文件内容，或一键打包下载",
                 jobType: "PREVIEW",
-                disabled: files.length === 0,
+                disabled: files.length === 0 || isCodeGenerating,
                 action: (
                   <div className="flex gap-1.5 shrink-0">
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={files.length === 0}
+                      disabled={files.length === 0 || isCodeGenerating}
                       onClick={() => setShowPreview(true)}
                     >
                       <Play className="mr-1.5 h-3 w-3" />
                       预览
                     </Button>
-                    <Button size="sm" variant="outline" disabled={files.length === 0} onClick={() => downloadFiles("all")}>
+                    <Button size="sm" variant="outline" disabled={files.length === 0 || isCodeGenerating} onClick={() => downloadFiles("all")}>
                       <Download className="mr-1.5 h-3 w-3" />
                       下载全部
                     </Button>
                   </div>
                 ),
               })}
+
+              {hasCodeFiles && !previewConfirmed && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 flex flex-wrap items-center gap-2">
+                  <Info className="h-3.5 w-3.5 shrink-0" />
+                  <span className="mr-auto">请先预览代码并确认无问题，再生成论文。</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={isCodeGenerating}
+                    onClick={() => setShowPreview(true)}
+                  >
+                    先预览
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={isCodeGenerating || confirmingPreview}
+                    onClick={() => confirmPreviewPassed()}
+                  >
+                    {confirmingPreview ? (
+                      <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="mr-1.5 h-3 w-3" />
+                    )}
+                    预览通过
+                  </Button>
+                </div>
+              )}
+
+              {previewConfirmed && (
+                <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-700">
+                  预览已确认，可进行论文生成
+                  {workspace.requirements?.previewConfirmedAt
+                    ? ` · ${new Date(workspace.requirements.previewConfirmedAt).toLocaleString("zh-CN")}`
+                    : ""}
+                </div>
+              )}
+
+              {previewMsg && (
+                <p className={`text-xs ${previewMsg.type === "success" ? "text-green-600" : "text-red-600"}`}>
+                  {previewMsg.text}
+                </p>
+              )}
+
+              {!featureConfirmed && (
+                <div className="flex items-center gap-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                  <Info className="h-3.5 w-3.5 shrink-0" />
+                  请先在上方完成“功能确认 + 难度评估”，再开始代码生成。
+                </div>
+              )}
 
               <div className="flex items-center gap-2 rounded-md bg-blue-50 px-3 py-2 text-xs text-blue-600">
                 <Info className="h-3.5 w-3.5 shrink-0" />
@@ -480,6 +800,9 @@ export default function WorkspaceDetailPage() {
                 const codeFiles = files.filter((f) => f.type === "CODE");
                 const thesisFiles = files.filter((f) => f.type === "THESIS");
                 const chartFiles = files.filter((f) => f.type === "CHART");
+                const templateFile = files.find(
+                  (f) => f.type === "CONFIG" && f.path.startsWith("templates/论文模板")
+                );
                 const hasCode = codeFiles.length > 0;
                 const hasThesis = thesisFiles.length > 0;
                 const hasChart = chartFiles.length > 0;
@@ -535,6 +858,53 @@ export default function WorkspaceDetailPage() {
                       </div>
                     )}
 
+                    <div className="rounded-lg border p-3 bg-muted/20 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-medium">论文模板（可选）</p>
+                          <p className="text-xs text-muted-foreground">
+                            支持 `.doc/.docx`，用于后续论文格式定制
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={uploadingTemplate}
+                          onClick={() => templateInputRef.current?.click()}
+                        >
+                          {uploadingTemplate ? (
+                            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          ) : (
+                            <Upload className="mr-1 h-3 w-3" />
+                          )}
+                          上传模板
+                        </Button>
+                      </div>
+                      <input
+                        ref={templateInputRef}
+                        type="file"
+                        accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        className="hidden"
+                        onChange={(event) => {
+                          const selected = event.target.files?.[0];
+                          if (selected) {
+                            void uploadTemplate(selected);
+                          }
+                          event.currentTarget.value = "";
+                        }}
+                      />
+                      {templateFile && (
+                        <p className="text-xs text-muted-foreground">
+                          当前模板：{templateFile.path.split("/").pop()}（{(templateFile.size / 1024).toFixed(1)} KB）
+                        </p>
+                      )}
+                      {templateUploadMsg && (
+                        <p className={`text-xs ${templateUploadMsg.type === "success" ? "text-green-600" : "text-red-600"}`}>
+                          {templateUploadMsg.text}
+                        </p>
+                      )}
+                    </div>
+
                     {hasAny && (
                       <Button
                         variant="outline"
@@ -579,6 +949,45 @@ export default function WorkspaceDetailPage() {
           </Card>
         </div>
       </div>
+
+      <Dialog open={reviseDialogOpen} onOpenChange={setReviseDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>调整功能范围</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              直接写你的想法即可，例如：增加角色、增加模块、最少表数量、指定关键流程等。
+            </p>
+            <Textarea
+              value={reviseIdea}
+              onChange={(e) => setReviseIdea(e.target.value)}
+              placeholder="例如：再加一个“审核员”角色；订单模块增加退款审核；数据库至少 8 张表。"
+              className="min-h-[140px]"
+            />
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setReviseDialogOpen(false)}
+                disabled={confirmingRequirements}
+              >
+                取消
+              </Button>
+              <Button
+                onClick={() => confirmRequirements("revise", reviseIdea)}
+                disabled={confirmingRequirements || codeGenerationStarted || !reviseIdea.trim()}
+              >
+                {confirmingRequirements ? (
+                  <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                ) : (
+                  <PencilLine className="mr-1.5 h-3 w-3" />
+                )}
+                AI 分析并确认功能
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Code preview dialog */}
       <CodePreviewDialog
