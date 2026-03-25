@@ -3,20 +3,11 @@ import { success, error } from "@/lib/api-response";
 import { requireAuth } from "@/lib/auth-helpers";
 import { taskQueue } from "@/lib/queue";
 import { ensureUserTokenQuota } from "@/lib/ai/usage";
+import { getPlatformConfig } from "@/lib/system-config";
 
 type WorkspaceRequirements = {
   previewConfirmed?: boolean;
 };
-
-function parsePositiveInt(value: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(value ?? "", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-const THESIS_GEN_TOKEN_RESERVE = parsePositiveInt(
-  process.env.THESIS_GEN_TOKEN_RESERVE,
-  220_000
-);
 
 export async function POST(
   _req: Request,
@@ -55,10 +46,15 @@ export async function POST(
     return error("请先点击预览并确认无问题后，再生成论文", 400);
   }
 
+  const platformConfig = await getPlatformConfig().catch(() => null);
+  if (platformConfig && !platformConfig.enableThesisGeneration) {
+    return error("平台当前已关闭论文生成功能，请联系管理员。", 403);
+  }
+
   try {
     await ensureUserTokenQuota(
       session!.user.id,
-      THESIS_GEN_TOKEN_RESERVE,
+      platformConfig?.thesisGenTokenReserve ?? 220_000,
       "论文生成"
     );
   } catch (quotaError) {
@@ -86,6 +82,7 @@ export async function POST(
     jobId: job.id,
     workspaceId: id,
     userId: session!.user.id,
+    modelId: platformConfig?.thesisGenModelId,
   });
 
   return success({ jobId: job.id, message: "论文生成任务已提交" }, 202);

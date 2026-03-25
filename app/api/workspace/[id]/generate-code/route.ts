@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth-helpers";
 import { taskQueue } from "@/lib/queue";
 import { ensureUserTokenQuota } from "@/lib/ai/usage";
 import { Prisma } from "@prisma/client";
+import { getPlatformConfig } from "@/lib/system-config";
 
 type WorkspaceRequirements = {
   featureConfirmed?: boolean;
@@ -11,16 +12,6 @@ type WorkspaceRequirements = {
   previewConfirmed?: boolean;
   previewConfirmedAt?: string | null;
 };
-
-function parsePositiveInt(value: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(value ?? "", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-const CODE_GEN_TOKEN_RESERVE = parsePositiveInt(
-  process.env.CODE_GEN_TOKEN_RESERVE,
-  120_000
-);
 
 export async function POST(
   _req: Request,
@@ -50,10 +41,15 @@ export async function POST(
     return error("缺少难度评估结果，请先重新确认功能", 400);
   }
 
+  const platformConfig = await getPlatformConfig().catch(() => null);
+  if (platformConfig && !platformConfig.enableCodeGeneration) {
+    return error("平台当前已关闭代码生成功能，请联系管理员。", 403);
+  }
+
   try {
     await ensureUserTokenQuota(
       session!.user.id,
-      CODE_GEN_TOKEN_RESERVE,
+      platformConfig?.codeGenTokenReserve ?? 120_000,
       "代码生成"
     );
   } catch (quotaError) {
@@ -93,6 +89,7 @@ export async function POST(
     jobId: job.id,
     workspaceId: id,
     userId: session!.user.id,
+    modelId: platformConfig?.codeGenModelId,
   });
 
   return success({ jobId: job.id, message: "代码生成任务已提交" }, 202);

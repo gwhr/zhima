@@ -17,8 +17,7 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials) {
         await ensureBuiltinAdminUser();
 
-        const identifier =
-          credentials?.identifier?.trim() || credentials?.email?.trim();
+        const identifier = credentials?.identifier?.trim();
 
         if (!identifier || !credentials?.password) {
           throw new Error("请输入账号和密码");
@@ -73,7 +72,7 @@ export const authOptions: NextAuthOptions = {
     async jwt({ token, user }) {
       if (user) {
         token.userId = user.id;
-        token.role = (user as { role: string }).role;
+        token.role = (user as unknown as { role?: string }).role ?? "USER";
       }
       return token;
     },

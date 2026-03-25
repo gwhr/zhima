@@ -65,14 +65,20 @@ export async function generateThesis(params: ThesisGenParams) {
       model,
       prompt,
     });
+    const usage = result.usage as {
+      inputTokens?: number;
+      outputTokens?: number;
+      promptTokens?: number;
+      completionTokens?: number;
+    };
 
     await recordUsage({
       userId: params.userId,
       workspaceId: params.workspaceId,
       taskType: "THESIS",
       modelId,
-      inputTokens: result.usage.promptTokens,
-      outputTokens: result.usage.completionTokens,
+      inputTokens: usage.inputTokens ?? usage.promptTokens ?? 0,
+      outputTokens: usage.outputTokens ?? usage.completionTokens ?? 0,
       durationMs: Date.now() - startTime,
     });
 

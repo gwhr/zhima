@@ -858,7 +858,7 @@ export default function WorkspaceDetailPage() {
                       </div>
                     )}
 
-                    <div className="rounded-lg border p-3 bg-muted/20 space-y-2">
+                    <div className="hidden rounded-lg border p-3 bg-muted/20 space-y-2">
                       <div className="flex items-center justify-between gap-2">
                         <div>
                           <p className="text-sm font-medium">论文模板（可选）</p>
@@ -903,6 +903,13 @@ export default function WorkspaceDetailPage() {
                           {templateUploadMsg.text}
                         </p>
                       )}
+                    </div>
+
+                    <div className="rounded-lg border p-3 bg-muted/20 space-y-2">
+                      <p className="text-sm font-medium">论文模板（平台统一）</p>
+                      <p className="text-xs text-muted-foreground">
+                        当前工作空间不再开放用户上传模板。平台会统一使用管理员后台启用的论文模板。
+                      </p>
                     </div>
 
                     {hasAny && (

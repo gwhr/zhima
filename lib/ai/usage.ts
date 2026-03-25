@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { modelCosts, type ModelId } from "./providers";
 import type { AiTaskType } from "@prisma/client";
+import { getPlatformConfig } from "@/lib/system-config";
 
 interface UsageParams {
   userId: string;
@@ -64,6 +65,14 @@ export async function recordUsage(params: UsageParams) {
 }
 
 export async function getUserTokenSummary(userId: string) {
+  let tokenBudget = getDefaultUserTokenBudget();
+  try {
+    const config = await getPlatformConfig();
+    tokenBudget = config.defaultUserTokenBudget;
+  } catch {
+    // Use env fallback when config storage is not ready yet.
+  }
+
   const aggregated = await db.aiUsageLog.aggregate({
     where: { userId },
     _sum: {
@@ -75,7 +84,6 @@ export async function getUserTokenSummary(userId: string) {
   const inputTokens = aggregated._sum.inputTokens ?? 0;
   const outputTokens = aggregated._sum.outputTokens ?? 0;
   const tokenUsed = inputTokens + outputTokens;
-  const tokenBudget = getDefaultUserTokenBudget();
 
   return {
     tokenBudget,

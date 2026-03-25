@@ -2,7 +2,6 @@ import { config } from "dotenv";
 config({ path: ".env.local" });
 config({ path: ".env" });
 import { Worker } from "bullmq";
-import Redis from "ioredis";
 import { PrismaClient, type AiTaskType } from "@prisma/client";
 import { generateText } from "ai";
 import { parseCodeBlocks, type ParsedFile } from "../lib/parser/code-parser";
@@ -17,13 +16,33 @@ import {
 } from "../lib/chart/diagram-generator";
 import sharp from "sharp";
 import * as path from "path";
-import { uploadFile } from "../lib/storage/oss";
+import { uploadFile, downloadFile } from "../lib/storage/oss";
 import { modelCosts, models, type ModelId } from "../lib/ai/providers";
 
-const connection = new Redis(process.env.REDIS_URL || "redis://localhost:6379", {
-  maxRetriesPerRequest: null,
-  enableReadyCheck: false,
-});
+function resolveRedisConnection() {
+  const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
+  try {
+    const parsed = new URL(redisUrl);
+    return {
+      host: parsed.hostname || "localhost",
+      port: Number(parsed.port || 6379),
+      username: parsed.username || undefined,
+      password: parsed.password || undefined,
+      db: parsed.pathname ? Number(parsed.pathname.slice(1) || 0) : 0,
+      maxRetriesPerRequest: null as null,
+      enableReadyCheck: false,
+    };
+  } catch {
+    return {
+      host: "localhost",
+      port: 6379,
+      maxRetriesPerRequest: null as null,
+      enableReadyCheck: false,
+    };
+  }
+}
+
+const connection = resolveRedisConnection();
 
 const db = new PrismaClient();
 
@@ -619,8 +638,9 @@ const worker = new Worker(
             "正在分析需求并构建代码生成提示词"
           );
 
-          const { modelId: codeModelId, model: codeModel, taskType: codeTaskType } =
-            getModelForJob("code-gen");
+          const codeModelId = resolveModelId(job.data.modelId, CODE_MODEL_ID);
+          const codeModel = models[codeModelId];
+          const codeTaskType: AiTaskType = "CODE_GEN";
           const codeStartAt = Date.now();
           const techStack = workspace.techStack as Record<string, string>;
           const { files, attempts, fallback, usage } =
@@ -702,11 +722,9 @@ const worker = new Worker(
         }
 
         case "thesis-gen": {
-          const {
-            modelId: thesisModelId,
-            model: thesisModel,
-            taskType: thesisTaskType,
-          } = getModelForJob("thesis-gen");
+          const thesisModelId = resolveModelId(job.data.modelId, THESIS_MODEL_ID);
+          const thesisModel = models[thesisModelId];
+          const thesisTaskType: AiTaskType = "THESIS";
           const thesisStartAt = Date.now();
           let thesisUsage: TokenUsageSummary = {
             inputTokens: 0,
@@ -719,6 +737,51 @@ const worker = new Worker(
           const roles = requirements.roles || [];
           const modules = requirements.modules || [];
           const tables = requirements.tables || [];
+          const activeTemplate = await db.thesisTemplate.findFirst({
+            where: { isActive: true },
+            select: {
+              id: true,
+              name: true,
+              path: true,
+              storageKey: true,
+              size: true,
+            },
+          });
+
+          if (activeTemplate) {
+            try {
+              const templateBuffer = await downloadFile(activeTemplate.storageKey);
+              const templateExt = path.extname(activeTemplate.path) || ".docx";
+              const templatePath = `templates/平台论文模板${templateExt}`;
+              const workspaceTemplateStorageKey = `workspaces/${workspaceId}/${templatePath}`;
+
+              await saveFile(workspaceTemplateStorageKey, templateBuffer);
+              await db.workspaceFile.upsert({
+                where: {
+                  workspaceId_path: {
+                    workspaceId,
+                    path: templatePath,
+                  },
+                },
+                create: {
+                  workspaceId,
+                  path: templatePath,
+                  type: "CONFIG",
+                  storageKey: workspaceTemplateStorageKey,
+                  size: templateBuffer.length,
+                },
+                update: {
+                  storageKey: workspaceTemplateStorageKey,
+                  size: templateBuffer.length,
+                },
+              });
+            } catch (templateError) {
+              console.warn(
+                `[Worker] Failed to attach active template for workspace ${workspaceId}:`,
+                templateError
+              );
+            }
+          }
 
           // --- Step 1: Generate diagrams (20%) ---
           await updateJobProgress(
@@ -936,6 +999,7 @@ ${projectContext}
                 chapters: chapters.length + 2,
                 diagrams: diagramResult.svgs.length,
                 tables: tableSchemas.length,
+                templateName: activeTemplate?.name ?? null,
                 inputTokens: thesisUsage.inputTokens,
                 outputTokens: thesisUsage.outputTokens,
                 totalTokens: thesisUsage.totalTokens,
