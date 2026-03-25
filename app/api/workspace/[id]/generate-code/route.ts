@@ -1,9 +1,13 @@
-import { db } from "@/lib/db";
+import { Prisma } from "@prisma/client";
 import { success, error } from "@/lib/api-response";
 import { requireAuth } from "@/lib/auth-helpers";
+import { db } from "@/lib/db";
 import { taskQueue } from "@/lib/queue";
 import { ensureUserTokenQuota } from "@/lib/ai/usage";
-import { Prisma } from "@prisma/client";
+import {
+  ensureUserTaskConcurrencyAllowed,
+  getQueueAttemptsFromRetryLimit,
+} from "@/lib/risk-control";
 import { getPlatformConfig } from "@/lib/system-config";
 
 type WorkspaceRequirements = {
@@ -21,10 +25,11 @@ export async function POST(
   if (authError) return authError;
 
   const { id } = await params;
+  const userId = session!.user.id;
 
   const workspace = await db.workspace.findUnique({ where: { id } });
   if (!workspace) return error("工作空间不存在", 404);
-  if (workspace.userId !== session!.user.id) return error("无权限", 403);
+  if (workspace.userId !== userId) return error("无权限", 403);
 
   const requirements =
     workspace.requirements &&
@@ -36,7 +41,6 @@ export async function POST(
   if (!requirements.featureConfirmed) {
     return error("请先确认功能范围并完成难度评估", 400);
   }
-
   if (!requirements.difficultyAssessment) {
     return error("缺少难度评估结果，请先重新确认功能", 400);
   }
@@ -46,9 +50,34 @@ export async function POST(
     return error("平台当前已关闭代码生成功能，请联系管理员。", 403);
   }
 
+  const existingJob = await db.taskJob.findFirst({
+    where: {
+      workspaceId: id,
+      type: "CODE_GEN",
+      status: { in: ["PENDING", "RUNNING"] },
+    },
+  });
+  if (existingJob) {
+    return error("代码正在生成中，请勿重复提交。", 409);
+  }
+
+  try {
+    await ensureUserTaskConcurrencyAllowed(
+      userId,
+      platformConfig?.defaultUserTaskConcurrencyLimit ?? 1
+    );
+  } catch (concurrencyError) {
+    return error(
+      concurrencyError instanceof Error
+        ? concurrencyError.message
+        : "当前并发任务已达上限，请稍后重试。",
+      429
+    );
+  }
+
   try {
     await ensureUserTokenQuota(
-      session!.user.id,
+      userId,
       platformConfig?.codeGenTokenReserve ?? 120_000,
       "代码生成"
     );
@@ -59,13 +88,6 @@ export async function POST(
     );
   }
 
-  const existingJob = await db.taskJob.findFirst({
-    where: { workspaceId: id, type: "CODE_GEN", status: { in: ["PENDING", "RUNNING"] } },
-  });
-
-  if (existingJob) return error("代码正在生成中", 409);
-
-  // 每次重新生成代码时，必须重新完成预览确认，避免论文基于未核验版本继续生成。
   await db.workspace.update({
     where: { id },
     data: {
@@ -85,12 +107,35 @@ export async function POST(
     },
   });
 
-  await taskQueue.add("code-gen", {
-    jobId: job.id,
-    workspaceId: id,
-    userId: session!.user.id,
-    modelId: platformConfig?.codeGenModelId,
-  });
+  const attempts = getQueueAttemptsFromRetryLimit(
+    platformConfig?.taskFailureRetryLimit ?? 2
+  );
 
-  return success({ jobId: job.id, message: "代码生成任务已提交" }, 202);
+  await taskQueue.add(
+    "code-gen",
+    {
+      jobId: job.id,
+      workspaceId: id,
+      userId,
+      modelId: platformConfig?.codeGenModelId,
+      singleTaskTokenHardLimit: platformConfig?.singleTaskTokenHardLimit,
+    },
+    {
+      attempts,
+      backoff: { type: "fixed", delay: 3_000 },
+    }
+  );
+
+  return success(
+    {
+      jobId: job.id,
+      message: "代码生成任务已提交",
+      riskControl: {
+        retryLimit: Math.max(0, attempts - 1),
+        singleTaskTokenHardLimit:
+          platformConfig?.singleTaskTokenHardLimit ?? 240_000,
+      },
+    },
+    202
+  );
 }

@@ -67,6 +67,11 @@ const THESIS_MODEL_ID = resolveModelId(
   DEFAULT_THESIS_MODEL_ID
 );
 const WORKER_MODEL_ID: ModelId = CODE_MODEL_ID;
+const DEFAULT_SINGLE_TASK_TOKEN_HARD_LIMIT = Number.isFinite(
+  Number(process.env.SINGLE_TASK_TOKEN_HARD_LIMIT)
+)
+  ? Math.max(1_000, Number(process.env.SINGLE_TASK_TOKEN_HARD_LIMIT))
+  : 240_000;
 
 function getModelForJob(
   jobName: string
@@ -137,6 +142,25 @@ function addUsage(
     outputTokens,
     totalTokens: inputTokens + outputTokens,
   };
+}
+
+function resolveSingleTaskTokenHardLimit(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_SINGLE_TASK_TOKEN_HARD_LIMIT;
+  }
+  return Math.max(1_000, Math.floor(parsed));
+}
+
+function enforceSingleTaskTokenHardLimit(
+  usage: TokenUsageSummary,
+  hardLimit: number,
+  phase: string
+) {
+  if (usage.totalTokens <= hardLimit) return;
+  throw new Error(
+    `${phase}超出单次任务 Token 上限（${usage.totalTokens} > ${hardLimit}），请拆分需求后重试。`
+  );
 }
 
 async function recordWorkerUsage(params: {
@@ -403,7 +427,8 @@ File: 相对路径
 async function generateCodeFilesWithRetry(
   workspace: { name: string; topic: string; techStack: unknown; requirements: unknown },
   techStack: Record<string, string>,
-  selectedModel: (typeof models)[ModelId]
+  selectedModel: (typeof models)[ModelId],
+  singleTaskTokenHardLimit: number
 ): Promise<{
   files: ParsedFile[];
   attempts: number;
@@ -418,6 +443,11 @@ async function generateCodeFilesWithRetry(
     const prompt = buildCodeGenAttemptPrompt(basePrompt, attempt);
     const result = await generateText({ model: selectedModel, prompt });
     usage = addUsage(usage, normalizeUsage(result.usage as UsageLike));
+    enforceSingleTaskTokenHardLimit(
+      usage,
+      singleTaskTokenHardLimit,
+      "代码生成"
+    );
     files = normalizeGeneratedFiles(
       parseCodeBlocks(result.text),
       workspace.name,
@@ -622,6 +652,9 @@ const worker = new Worker(
   async (job) => {
     console.log(`[Worker] Processing job ${job.id} type=${job.name}`);
     const { jobId, workspaceId, userId } = job.data;
+    const singleTaskTokenHardLimit = resolveSingleTaskTokenHardLimit(
+      job.data.singleTaskTokenHardLimit
+    );
 
     try {
       await updateJobProgress(jobId, 10, "任务启动", "任务已进入执行队列");
@@ -644,7 +677,12 @@ const worker = new Worker(
           const codeStartAt = Date.now();
           const techStack = workspace.techStack as Record<string, string>;
           const { files, attempts, fallback, usage } =
-            await generateCodeFilesWithRetry(workspace, techStack, codeModel);
+            await generateCodeFilesWithRetry(
+              workspace,
+              techStack,
+              codeModel,
+              singleTaskTokenHardLimit
+            );
 
           await updateJobProgress(
             jobId,
@@ -890,6 +928,11 @@ ${projectContext}
               thesisUsage,
               normalizeUsage(result.usage as UsageLike)
             );
+            enforceSingleTaskTokenHardLimit(
+              thesisUsage,
+              singleTaskTokenHardLimit,
+              "论文生成"
+            );
             chapterContents.push({ title: ch.key, content: result.text });
           }
 
@@ -1094,15 +1137,26 @@ ${projectContext}
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       console.error(`[Worker] Job ${jobId} failed:`, message);
+      const totalAttempts =
+        typeof job.opts.attempts === "number" && job.opts.attempts > 0
+          ? job.opts.attempts
+          : 1;
+      const currentAttempt = job.attemptsMade + 1;
+      const willRetry = currentAttempt < totalAttempts;
       await db.taskJob.update({
         where: { id: jobId },
         data: {
-          status: "FAILED",
+          status: willRetry ? "PENDING" : "FAILED",
           error: message,
           result: {
             stage: "任务失败",
-            detail: message,
+            detail: willRetry
+              ? `${message}（准备重试 ${currentAttempt}/${totalAttempts}）`
+              : message,
             model: WORKER_MODEL_ID,
+            attemptsMade: currentAttempt,
+            attemptsTotal: totalAttempts,
+            retrying: willRetry,
           },
         },
       });

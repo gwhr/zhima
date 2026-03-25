@@ -10,6 +10,9 @@ export interface PlatformConfig {
   defaultUserTokenBudget: number;
   codeGenTokenReserve: number;
   thesisGenTokenReserve: number;
+  defaultUserTaskConcurrencyLimit: number;
+  taskFailureRetryLimit: number;
+  singleTaskTokenHardLimit: number;
   enableCodeGeneration: boolean;
   enableThesisGeneration: boolean;
   enablePreviewBuild: boolean;
@@ -20,6 +23,11 @@ export interface PlatformConfig {
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseNonNegativeInt(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
@@ -42,6 +50,18 @@ export function getDefaultPlatformConfigFromEnv(): PlatformConfig {
     thesisGenTokenReserve: parsePositiveInt(
       process.env.THESIS_GEN_TOKEN_RESERVE,
       220_000
+    ),
+    defaultUserTaskConcurrencyLimit: parsePositiveInt(
+      process.env.DEFAULT_USER_TASK_CONCURRENCY_LIMIT,
+      1
+    ),
+    taskFailureRetryLimit: parseNonNegativeInt(
+      process.env.TASK_FAILURE_RETRY_LIMIT,
+      2
+    ),
+    singleTaskTokenHardLimit: parsePositiveInt(
+      process.env.SINGLE_TASK_TOKEN_HARD_LIMIT,
+      240_000
     ),
     enableCodeGeneration: parseBoolean(process.env.ENABLE_CODE_GENERATION, true),
     enableThesisGeneration: parseBoolean(
@@ -77,6 +97,27 @@ function normalizeConfig(
     thesisGenTokenReserve: Math.max(
       1,
       Number(input.thesisGenTokenReserve ?? defaults.thesisGenTokenReserve)
+    ),
+    defaultUserTaskConcurrencyLimit: Math.max(
+      1,
+      Math.min(
+        20,
+        Number(
+          input.defaultUserTaskConcurrencyLimit ??
+            defaults.defaultUserTaskConcurrencyLimit
+        )
+      )
+    ),
+    taskFailureRetryLimit: Math.max(
+      0,
+      Math.min(
+        5,
+        Number(input.taskFailureRetryLimit ?? defaults.taskFailureRetryLimit)
+      )
+    ),
+    singleTaskTokenHardLimit: Math.max(
+      1_000,
+      Number(input.singleTaskTokenHardLimit ?? defaults.singleTaskTokenHardLimit)
     ),
     maintenanceNoticeText:
       typeof input.maintenanceNoticeText === "string"

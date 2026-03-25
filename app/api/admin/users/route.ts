@@ -21,9 +21,11 @@ export async function GET(req: Request) {
   );
   const search = searchParams.get("search")?.trim() || "";
   let tokenBudget = 500_000;
+  let defaultUserTaskConcurrencyLimit = 1;
   try {
     const config = await getPlatformConfig();
     tokenBudget = config.defaultUserTokenBudget;
+    defaultUserTaskConcurrencyLimit = config.defaultUserTaskConcurrencyLimit;
   } catch {
     // Fallback to default when config table is not initialized.
   }
@@ -49,6 +51,7 @@ export async function GET(req: Request) {
         phone: true,
         name: true,
         role: true,
+        taskConcurrencyLimitOverride: true,
         createdAt: true,
         _count: {
           select: { workspaces: true, orders: true },
@@ -100,6 +103,8 @@ export async function GET(req: Request) {
       tokenUsed,
       tokenRemaining: Math.max(0, tokenBudget - tokenUsed),
       totalCostYuan: usage?.totalCostYuan ?? 0,
+      effectiveTaskConcurrencyLimit:
+        user.taskConcurrencyLimitOverride ?? defaultUserTaskConcurrencyLimit,
     };
   });
 

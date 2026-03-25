@@ -18,10 +18,15 @@ This addendum records the 2026-03-25 delivery set and corresponding archive path
 - New admin modules
   - announcements (`/admin/announcements`)
   - platform config (`/admin/platform`)
+- Risk-control thresholds
+  - platform: default user concurrency / retry limit / single-task token hard cap
+  - user-level concurrency override (`/api/admin/users/[id]/risk-control`)
+  - queue dispatch guard and worker hard-cap stop
 
 ## Archive
 
 - `openspec/changes/archive/2026-03-25-admin-p0-upgrade/admin-p0-platform`
+- `openspec/changes/archive/2026-03-25-risk-control-thresholds/task-risk-control`
 
 ## Execution Order (Locked)
 

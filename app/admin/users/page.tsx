@@ -18,6 +18,8 @@ interface UserItem {
   tokenUsed: number;
   tokenRemaining: number;
   totalCostYuan: number;
+  taskConcurrencyLimitOverride: number | null;
+  effectiveTaskConcurrencyLimit: number;
   _count: { workspaces: number; orders: number };
 }
 
@@ -27,6 +29,8 @@ export default function AdminUsersPage() {
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState<string | null>(null);
+  const [savingUserId, setSavingUserId] = useState<string | null>(null);
   const pageSize = 20;
 
   async function fetchUsers(nextPage: number = 1, keyword = search) {
@@ -47,6 +51,52 @@ export default function AdminUsersPage() {
       setPage(nextPage);
     }
     setLoading(false);
+  }
+
+  async function setUserConcurrency(user: UserItem) {
+    const placeholder =
+      user.taskConcurrencyLimitOverride === null
+        ? `当前为平台默认(${user.effectiveTaskConcurrencyLimit})，输入空值恢复默认`
+        : `当前覆盖值: ${user.taskConcurrencyLimitOverride}，输入空值恢复默认`;
+    const raw = window.prompt(
+      `${placeholder}\n请输入新的并发上限（1-20）：`,
+      user.taskConcurrencyLimitOverride?.toString() ?? ""
+    );
+    if (raw === null) return;
+
+    const trimmed = raw.trim();
+    const parsedOverride = trimmed === "" ? null : Number(trimmed);
+    if (
+      trimmed !== "" &&
+      (!Number.isFinite(parsedOverride) || (parsedOverride ?? 0) <= 0)
+    ) {
+      setMessage("并发上限必须是正整数，留空表示恢复平台默认值。");
+      return;
+    }
+
+    setSavingUserId(user.id);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/admin/users/${user.id}/risk-control`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          taskConcurrencyLimitOverride:
+            parsedOverride === null ? null : Math.floor(parsedOverride),
+        }),
+      });
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || "设置失败");
+      }
+
+      setMessage("用户并发上限已更新。");
+      await fetchUsers(page, search);
+    } catch (setError) {
+      setMessage(setError instanceof Error ? setError.message : "设置失败");
+    } finally {
+      setSavingUserId(null);
+    }
   }
 
   useEffect(() => {
@@ -81,6 +131,7 @@ export default function AdminUsersPage() {
           </Button>
         </div>
       </div>
+      {message && <p className="text-sm text-muted-foreground">{message}</p>}
 
       <Card>
         <CardHeader className="pb-3">
@@ -103,6 +154,7 @@ export default function AdminUsersPage() {
                     <th className="text-left py-3 px-2 font-medium">工作空间</th>
                     <th className="text-left py-3 px-2 font-medium">订单</th>
                     <th className="text-left py-3 px-2 font-medium">Token（已用/总额）</th>
+                    <th className="text-left py-3 px-2 font-medium">并发上限</th>
                     <th className="text-left py-3 px-2 font-medium">累计 AI 成本</th>
                     <th className="text-left py-3 px-2 font-medium">注册时间</th>
                   </tr>
@@ -127,6 +179,26 @@ export default function AdminUsersPage() {
                         <p className="text-xs text-muted-foreground">
                           剩余 {user.tokenRemaining.toLocaleString()}
                         </p>
+                      </td>
+                      <td className="py-3 px-2">
+                        <p className="tabular-nums">
+                          {user.taskConcurrencyLimitOverride ??
+                            user.effectiveTaskConcurrencyLimit}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {user.taskConcurrencyLimitOverride === null
+                            ? "平台默认"
+                            : "用户覆盖"}
+                        </p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="mt-2 h-7 px-2 text-xs"
+                          disabled={savingUserId === user.id}
+                          onClick={() => void setUserConcurrency(user)}
+                        >
+                          {savingUserId === user.id ? "保存中..." : "设置并发"}
+                        </Button>
                       </td>
                       <td className="py-3 px-2 tabular-nums">
                         ¥ {user.totalCostYuan.toFixed(4)}

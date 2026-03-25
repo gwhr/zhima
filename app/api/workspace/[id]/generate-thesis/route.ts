@@ -1,8 +1,12 @@
-import { db } from "@/lib/db";
 import { success, error } from "@/lib/api-response";
 import { requireAuth } from "@/lib/auth-helpers";
+import { db } from "@/lib/db";
 import { taskQueue } from "@/lib/queue";
 import { ensureUserTokenQuota } from "@/lib/ai/usage";
+import {
+  ensureUserTaskConcurrencyAllowed,
+  getQueueAttemptsFromRetryLimit,
+} from "@/lib/risk-control";
 import { getPlatformConfig } from "@/lib/system-config";
 
 type WorkspaceRequirements = {
@@ -17,23 +21,28 @@ export async function POST(
   if (authError) return authError;
 
   const { id } = await params;
+  const userId = session!.user.id;
 
   const workspace = await db.workspace.findUnique({ where: { id } });
   if (!workspace) return error("工作空间不存在", 404);
-  if (workspace.userId !== session!.user.id) return error("无权限", 403);
+  if (workspace.userId !== userId) return error("无权限", 403);
 
   const runningCodeJob = await db.taskJob.findFirst({
-    where: { workspaceId: id, type: "CODE_GEN", status: { in: ["PENDING", "RUNNING"] } },
+    where: {
+      workspaceId: id,
+      type: "CODE_GEN",
+      status: { in: ["PENDING", "RUNNING"] },
+    },
   });
   if (runningCodeJob) {
-    return error("代码仍在生成中，请先等待完成并进行预览确认", 409);
+    return error("代码仍在生成中，请先等待完成并进行预览确认。", 409);
   }
 
   const codeFileCount = await db.workspaceFile.count({
     where: { workspaceId: id, type: "CODE" },
   });
   if (codeFileCount === 0) {
-    return error("请先生成代码并完成预览后再生成论文", 400);
+    return error("请先生成代码并完成预览后再生成论文。", 400);
   }
 
   const requirements =
@@ -43,7 +52,7 @@ export async function POST(
       ? (workspace.requirements as WorkspaceRequirements)
       : {};
   if (!requirements.previewConfirmed) {
-    return error("请先点击预览并确认无问题后，再生成论文", 400);
+    return error("请先点击预览并确认无问题后，再生成论文。", 400);
   }
 
   const platformConfig = await getPlatformConfig().catch(() => null);
@@ -51,9 +60,34 @@ export async function POST(
     return error("平台当前已关闭论文生成功能，请联系管理员。", 403);
   }
 
+  const existingJob = await db.taskJob.findFirst({
+    where: {
+      workspaceId: id,
+      type: "THESIS_GEN",
+      status: { in: ["PENDING", "RUNNING"] },
+    },
+  });
+  if (existingJob) {
+    return error("论文正在生成中，请勿重复提交。", 409);
+  }
+
+  try {
+    await ensureUserTaskConcurrencyAllowed(
+      userId,
+      platformConfig?.defaultUserTaskConcurrencyLimit ?? 1
+    );
+  } catch (concurrencyError) {
+    return error(
+      concurrencyError instanceof Error
+        ? concurrencyError.message
+        : "当前并发任务已达上限，请稍后重试。",
+      429
+    );
+  }
+
   try {
     await ensureUserTokenQuota(
-      session!.user.id,
+      userId,
       platformConfig?.thesisGenTokenReserve ?? 220_000,
       "论文生成"
     );
@@ -64,12 +98,6 @@ export async function POST(
     );
   }
 
-  const existingJob = await db.taskJob.findFirst({
-    where: { workspaceId: id, type: "THESIS_GEN", status: { in: ["PENDING", "RUNNING"] } },
-  });
-
-  if (existingJob) return error("论文正在生成中", 409);
-
   const job = await db.taskJob.create({
     data: {
       workspaceId: id,
@@ -78,12 +106,35 @@ export async function POST(
     },
   });
 
-  await taskQueue.add("thesis-gen", {
-    jobId: job.id,
-    workspaceId: id,
-    userId: session!.user.id,
-    modelId: platformConfig?.thesisGenModelId,
-  });
+  const attempts = getQueueAttemptsFromRetryLimit(
+    platformConfig?.taskFailureRetryLimit ?? 2
+  );
 
-  return success({ jobId: job.id, message: "论文生成任务已提交" }, 202);
+  await taskQueue.add(
+    "thesis-gen",
+    {
+      jobId: job.id,
+      workspaceId: id,
+      userId,
+      modelId: platformConfig?.thesisGenModelId,
+      singleTaskTokenHardLimit: platformConfig?.singleTaskTokenHardLimit,
+    },
+    {
+      attempts,
+      backoff: { type: "fixed", delay: 3_000 },
+    }
+  );
+
+  return success(
+    {
+      jobId: job.id,
+      message: "论文生成任务已提交",
+      riskControl: {
+        retryLimit: Math.max(0, attempts - 1),
+        singleTaskTokenHardLimit:
+          platformConfig?.singleTaskTokenHardLimit ?? 240_000,
+      },
+    },
+    202
+  );
 }

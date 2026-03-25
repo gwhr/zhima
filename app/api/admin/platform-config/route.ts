@@ -26,12 +26,14 @@ export async function PATCH(req: Request) {
   if (!body) return error("请求参数无效", 400);
 
   const patch: Record<string, unknown> = {};
-  const numberKeys = [
+  const positiveNumberKeys = [
     "defaultUserTokenBudget",
     "codeGenTokenReserve",
     "thesisGenTokenReserve",
+    "defaultUserTaskConcurrencyLimit",
+    "singleTaskTokenHardLimit",
   ] as const;
-  for (const key of numberKeys) {
+  for (const key of positiveNumberKeys) {
     if (key in body) {
       const value = Number(body[key]);
       if (!Number.isFinite(value) || value <= 0) {
@@ -39,6 +41,14 @@ export async function PATCH(req: Request) {
       }
       patch[key] = Math.floor(value);
     }
+  }
+
+  if ("taskFailureRetryLimit" in body) {
+    const value = Number(body.taskFailureRetryLimit);
+    if (!Number.isFinite(value) || value < 0) {
+      return error("taskFailureRetryLimit 必须为非负数", 400);
+    }
+    patch.taskFailureRetryLimit = Math.floor(value);
   }
 
   const booleanKeys = [

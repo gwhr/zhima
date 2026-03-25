@@ -13,6 +13,9 @@ interface PlatformConfig {
   defaultUserTokenBudget: number;
   codeGenTokenReserve: number;
   thesisGenTokenReserve: number;
+  defaultUserTaskConcurrencyLimit: number;
+  taskFailureRetryLimit: number;
+  singleTaskTokenHardLimit: number;
   enableCodeGeneration: boolean;
   enableThesisGeneration: boolean;
   enablePreviewBuild: boolean;
@@ -192,6 +195,82 @@ export default function AdminPlatformPage() {
               />
             </label>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">风控阈值</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-3 md:grid-cols-3">
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">
+                默认单用户并发任务上限
+              </span>
+              <Input
+                type="number"
+                min={1}
+                value={config.defaultUserTaskConcurrencyLimit}
+                onChange={(event) =>
+                  setConfig((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          defaultUserTaskConcurrencyLimit: Number(
+                            event.target.value || 0
+                          ),
+                        }
+                      : prev
+                  )
+                }
+              />
+            </label>
+
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">同类任务失败重试次数</span>
+              <Input
+                type="number"
+                min={0}
+                value={config.taskFailureRetryLimit}
+                onChange={(event) =>
+                  setConfig((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          taskFailureRetryLimit: Number(event.target.value || 0),
+                        }
+                      : prev
+                  )
+                }
+              />
+            </label>
+
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">单次任务 Token 硬上限</span>
+              <Input
+                type="number"
+                min={1}
+                value={config.singleTaskTokenHardLimit}
+                onChange={(event) =>
+                  setConfig((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          singleTaskTokenHardLimit: Number(
+                            event.target.value || 0
+                          ),
+                        }
+                      : prev
+                  )
+                }
+              />
+            </label>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            用户可在“用户管理”中单独覆盖并发上限；重试次数和单次任务 Token
+            上限为全平台统一策略。
+          </p>
         </CardContent>
       </Card>
 
