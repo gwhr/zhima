@@ -14,6 +14,7 @@ interface UserItem {
   name: string | null;
   role: string;
   createdAt: string;
+  tokenBudgetOverride: number | null;
   tokenBudget: number;
   tokenUsed: number;
   tokenRemaining: number;
@@ -91,6 +92,52 @@ export default function AdminUsersPage() {
       }
 
       setMessage("用户并发上限已更新。");
+      await fetchUsers(page, search);
+    } catch (setError) {
+      setMessage(setError instanceof Error ? setError.message : "设置失败");
+    } finally {
+      setSavingUserId(null);
+    }
+  }
+
+  async function setUserTokenBudget(user: UserItem) {
+    const placeholder =
+      user.tokenBudgetOverride === null
+        ? `当前为平台默认(${user.tokenBudget.toLocaleString()})，输入空值恢复默认`
+        : `当前覆盖值: ${user.tokenBudgetOverride.toLocaleString()}，输入空值恢复默认`;
+    const raw = window.prompt(
+      `${placeholder}\n请输入新的 Token 总额度（正整数）：`,
+      user.tokenBudgetOverride?.toString() ?? ""
+    );
+    if (raw === null) return;
+
+    const trimmed = raw.trim();
+    const parsedOverride = trimmed === "" ? null : Number(trimmed);
+    if (
+      trimmed !== "" &&
+      (!Number.isFinite(parsedOverride) || (parsedOverride ?? 0) <= 0)
+    ) {
+      setMessage("Token 总额度必须是正整数，留空表示恢复平台默认值。");
+      return;
+    }
+
+    setSavingUserId(user.id);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/admin/users/${user.id}/risk-control`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tokenBudgetOverride:
+            parsedOverride === null ? null : Math.floor(parsedOverride),
+        }),
+      });
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || "设置失败");
+      }
+
+      setMessage("用户 Token 总额度已更新。");
       await fetchUsers(page, search);
     } catch (setError) {
       setMessage(setError instanceof Error ? setError.message : "设置失败");
@@ -179,6 +226,18 @@ export default function AdminUsersPage() {
                         <p className="text-xs text-muted-foreground">
                           剩余 {user.tokenRemaining.toLocaleString()}
                         </p>
+                        <p className="text-xs text-muted-foreground">
+                          {user.tokenBudgetOverride === null ? "平台默认" : "用户覆盖"}
+                        </p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="mt-2 h-7 px-2 text-xs"
+                          disabled={savingUserId === user.id}
+                          onClick={() => void setUserTokenBudget(user)}
+                        >
+                          {savingUserId === user.id ? "保存中..." : "设置额度"}
+                        </Button>
                       </td>
                       <td className="py-3 px-2">
                         <p className="tabular-nums">

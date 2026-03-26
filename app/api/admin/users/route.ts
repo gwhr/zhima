@@ -51,6 +51,7 @@ export async function GET(req: Request) {
         phone: true,
         name: true,
         role: true,
+        tokenBudgetOverride: true,
         taskConcurrencyLimitOverride: true,
         createdAt: true,
         _count: {
@@ -96,12 +97,14 @@ export async function GET(req: Request) {
     const inputTokens = usage?.inputTokens ?? 0;
     const outputTokens = usage?.outputTokens ?? 0;
     const tokenUsed = inputTokens + outputTokens;
+    const effectiveTokenBudget =
+      user.tokenBudgetOverride ?? tokenBudget;
 
     return {
       ...user,
-      tokenBudget,
+      tokenBudget: effectiveTokenBudget,
       tokenUsed,
-      tokenRemaining: Math.max(0, tokenBudget - tokenUsed),
+      tokenRemaining: Math.max(0, effectiveTokenBudget - tokenUsed),
       totalCostYuan: usage?.totalCostYuan ?? 0,
       effectiveTaskConcurrencyLimit:
         user.taskConcurrencyLimitOverride ?? defaultUserTaskConcurrencyLimit,

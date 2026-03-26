@@ -9,7 +9,6 @@ import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
   FolderOpen,
-  CreditCard,
   UserCircle,
   Plus,
   Share2,
@@ -26,7 +25,6 @@ interface Workspace {
 const navItems = [
   { href: "/dashboard", icon: LayoutDashboard, label: "仪表盘" },
   { href: "/workspace", icon: FolderOpen, label: "工作空间" },
-  { href: "/dashboard/billing", icon: CreditCard, label: "套餐管理" },
   { href: "/dashboard/referral", icon: Share2, label: "邀请好友" },
   { href: "/dashboard/profile", icon: UserCircle, label: "个人设置" },
 ];

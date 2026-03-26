@@ -214,11 +214,17 @@ docker compose ps  # 确认 postgres 和 redis 都是 Running
 
 当前版本支持“按用户总 Token 额度”控制成本，不依赖前端模型下拉。
 
+- 付费入口:
+  - 一期默认隐藏前端套餐/支付入口
+  - 后端支付接口保留，待备案和合规完成后再开放 UI
+
 - 固定模型（Worker）:
   - `CODE_GEN_MODEL_ID=deepseek`
   - `THESIS_GEN_MODEL_ID=glm`
 - 免费额度:
   - `DEFAULT_USER_TOKEN_BUDGET=500000`
+- 单用户覆盖:
+  - 管理员可在「用户管理」按用户设置 Token 总额度覆盖值（留空恢复平台默认）
 - 任务入队预留:
   - `CODE_GEN_TOKEN_RESERVE=120000`
   - `THESIS_GEN_TOKEN_RESERVE=220000`

@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { NotificationBell } from "@/components/notification-bell";
-import { Code2, LogOut, Settings, User } from "lucide-react";
+import { Code2, LogOut, User } from "lucide-react";
 
 export function Navbar() {
   const { data: session } = useSession();
@@ -62,12 +62,6 @@ export function Navbar() {
                     <Link href="/dashboard/profile" className="cursor-pointer">
                       <User className="mr-2 h-4 w-4" />
                       个人设置
-                    </Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <Link href="/dashboard/billing" className="cursor-pointer">
-                      <Settings className="mr-2 h-4 w-4" />
-                      套餐管理
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />

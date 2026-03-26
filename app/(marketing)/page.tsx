@@ -8,7 +8,6 @@ import {
   Zap,
   Shield,
   Clock,
-  CheckCircle2,
   ArrowRight,
 } from "lucide-react";
 
@@ -42,25 +41,6 @@ const features = [
     icon: Clock,
     title: "快速交付",
     desc: "数分钟内完成代码框架生成，数小时完成完整毕设项目",
-  },
-];
-
-const plans = [
-  {
-    name: "基础版",
-    price: "99",
-    features: ["1 个工作空间", "代码生成（基础模型）", "论文生成（1 万字）", "5 次修改机会"],
-  },
-  {
-    name: "标准版",
-    price: "199",
-    popular: true,
-    features: ["3 个工作空间", "代码生成（高级模型）", "论文生成（2 万字）", "15 次修改机会", "图表生成", "在线预览"],
-  },
-  {
-    name: "高级版",
-    price: "399",
-    features: ["无限工作空间", "代码生成（顶级模型）", "论文生成（3 万字）", "无限修改", "图表生成", "在线预览", "答辩辅导"],
   },
 ];
 
@@ -150,46 +130,21 @@ export default function MarketingHome() {
         </div>
       </section>
 
-      {/* Pricing */}
+      {/* Phase-1 notice */}
       <section id="pricing" className="py-20">
         <div className="mx-auto max-w-6xl px-4">
           <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold">选择套餐</h2>
-            <p className="mt-3 text-muted-foreground">灵活定价，满足不同需求</p>
+            <h2 className="text-3xl font-bold">一期上线说明</h2>
+            <p className="mt-3 text-muted-foreground">当前阶段以功能可用和体验稳定为优先，先开放免费使用</p>
           </div>
-          <div className="grid gap-6 md:grid-cols-3">
-            {plans.map((plan) => (
-              <Card
-                key={plan.name}
-                className={plan.popular ? "border-primary shadow-lg relative" : ""}
-              >
-                {plan.popular && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-primary px-4 py-1 text-xs font-medium text-primary-foreground">
-                    最受欢迎
-                  </div>
-                )}
-                <CardHeader className="text-center pb-2">
-                  <CardTitle>{plan.name}</CardTitle>
-                  <div className="mt-4">
-                    <span className="text-4xl font-bold">¥{plan.price}</span>
-                    <span className="text-muted-foreground"> /项目</span>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <ul className="space-y-3 mb-6">
-                    {plan.features.map((f) => (
-                      <li key={f} className="flex items-center gap-2 text-sm">
-                        <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
-                        {f}
-                      </li>
-                    ))}
-                  </ul>
-                  <Button className="w-full" variant={plan.popular ? "default" : "outline"} asChild>
-                    <Link href="/register">立即开始</Link>
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
+          <div className="mx-auto max-w-3xl">
+            <Card>
+              <CardContent className="pt-6 space-y-3 text-sm text-muted-foreground">
+                <p>1. 一期阶段暂不开放在线付费购买，平台统一提供可用额度。</p>
+                <p>2. 用户可直接体验项目创建、代码生成、论文生成、预览与下载完整链路。</p>
+                <p>3. 后续会在备案与合规完成后，升级为按 token 计费和权益管理方案。</p>
+              </CardContent>
+            </Card>
           </div>
         </div>
       </section>

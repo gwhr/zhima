@@ -13,9 +13,16 @@ export async function PATCH(
   const body = (await req.json().catch(() => null)) as
     | {
         taskConcurrencyLimitOverride?: number | null | string;
+        tokenBudgetOverride?: number | null | string;
       }
     | null;
-  if (!body || !("taskConcurrencyLimitOverride" in body)) {
+  if (!body) {
+    return error("请求参数无效", 400);
+  }
+
+  const hasConcurrencyField = "taskConcurrencyLimitOverride" in body;
+  const hasTokenBudgetField = "tokenBudgetOverride" in body;
+  if (!hasConcurrencyField && !hasTokenBudgetField) {
     return error("请求参数无效", 400);
   }
 
@@ -27,6 +34,7 @@ export async function PATCH(
       name: true,
       email: true,
       phone: true,
+      tokenBudgetOverride: true,
       taskConcurrencyLimitOverride: true,
     },
   });
@@ -34,44 +42,65 @@ export async function PATCH(
     return error("用户不存在", 404);
   }
 
-  let overrideValue: number | null = null;
-  const rawValue = body.taskConcurrencyLimitOverride;
-
-  if (rawValue !== null && rawValue !== "" && rawValue !== undefined) {
-    const parsed = Number(rawValue);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      return error("并发上限必须为正整数，留空表示使用平台默认值", 400);
+  let overrideValue = exists.taskConcurrencyLimitOverride;
+  if (hasConcurrencyField) {
+    overrideValue = null;
+    const rawValue = body.taskConcurrencyLimitOverride;
+    if (rawValue !== null && rawValue !== "" && rawValue !== undefined) {
+      const parsed = Number(rawValue);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return error("并发上限必须为正整数，留空表示使用平台默认值", 400);
+      }
+      overrideValue = Math.min(20, Math.floor(parsed));
     }
-    overrideValue = Math.min(20, Math.floor(parsed));
+  }
+
+  let tokenBudgetOverride = exists.tokenBudgetOverride;
+  if (hasTokenBudgetField) {
+    tokenBudgetOverride = null;
+    const rawBudget = body.tokenBudgetOverride;
+    if (rawBudget !== null && rawBudget !== "" && rawBudget !== undefined) {
+      const parsed = Number(rawBudget);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return error("Token 总额度必须为正整数，留空表示使用平台默认值", 400);
+      }
+      tokenBudgetOverride = Math.floor(parsed);
+    }
   }
 
   const updated = await db.user.update({
     where: { id },
     data: {
       taskConcurrencyLimitOverride: overrideValue,
+      tokenBudgetOverride,
     },
     select: {
       id: true,
       taskConcurrencyLimitOverride: true,
+      tokenBudgetOverride: true,
     },
   });
 
   await logAdminAudit({
     adminUserId: session!.user.id,
-    action: "user.risk_control.update_concurrency_override",
+    action: "user.risk_control.update",
     module: "users",
     targetType: "User",
     targetId: id,
-    summary: `设置用户并发覆盖上限为 ${
-      overrideValue === null ? "平台默认" : String(overrideValue)
-    }`,
+    summary: "更新用户风控/额度覆盖配置",
     before: {
       taskConcurrencyLimitOverride: exists.taskConcurrencyLimitOverride,
+      tokenBudgetOverride: exists.tokenBudgetOverride,
     },
     after: {
       taskConcurrencyLimitOverride: updated.taskConcurrencyLimitOverride,
+      tokenBudgetOverride: updated.tokenBudgetOverride,
     },
     metadata: {
+      changedFields: {
+        taskConcurrencyLimitOverride: hasConcurrencyField,
+        tokenBudgetOverride: hasTokenBudgetField,
+      },
       targetUser: {
         id: exists.id,
         name: exists.name,

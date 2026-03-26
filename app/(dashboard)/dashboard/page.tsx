@@ -122,15 +122,15 @@ export default async function DashboardPage() {
               </div>
             </Link>
             <Link
-              href="/dashboard/billing"
+              href="/dashboard/referral"
               className="flex items-center gap-3 p-3 rounded-lg border hover:bg-muted/50 transition-colors"
             >
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-100">
                 <Zap className="h-5 w-5 text-green-600" />
               </div>
               <div>
-                <p className="font-medium text-sm">查看套餐</p>
-                <p className="text-xs text-muted-foreground">选择合适的套餐方案</p>
+                <p className="font-medium text-sm">邀请好友</p>
+                <p className="text-xs text-muted-foreground">分享邀请码，获得奖励</p>
               </div>
             </Link>
           </CardContent>

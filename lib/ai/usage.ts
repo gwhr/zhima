@@ -27,6 +27,34 @@ export function getDefaultUserTokenBudget(): number {
   );
 }
 
+export async function getEffectiveUserTokenBudget(userId: string): Promise<number> {
+  let tokenBudget = getDefaultUserTokenBudget();
+  try {
+    const config = await getPlatformConfig();
+    tokenBudget = config.defaultUserTokenBudget;
+  } catch {
+    // Use env fallback when config storage is not ready yet.
+  }
+
+  try {
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { tokenBudgetOverride: true },
+    });
+    if (
+      typeof user?.tokenBudgetOverride === "number" &&
+      Number.isFinite(user.tokenBudgetOverride) &&
+      user.tokenBudgetOverride > 0
+    ) {
+      return Math.floor(user.tokenBudgetOverride);
+    }
+  } catch {
+    // Ignore user-level lookup failures and fallback to platform default.
+  }
+
+  return tokenBudget;
+}
+
 export async function recordUsage(params: UsageParams) {
   const costs = await getModelPricing(params.modelId);
   const costYuan =
@@ -65,13 +93,7 @@ export async function recordUsage(params: UsageParams) {
 }
 
 export async function getUserTokenSummary(userId: string) {
-  let tokenBudget = getDefaultUserTokenBudget();
-  try {
-    const config = await getPlatformConfig();
-    tokenBudget = config.defaultUserTokenBudget;
-  } catch {
-    // Use env fallback when config storage is not ready yet.
-  }
+  const tokenBudget = await getEffectiveUserTokenBudget(userId);
 
   const aggregated = await db.aiUsageLog.aggregate({
     where: { userId },

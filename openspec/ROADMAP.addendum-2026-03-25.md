@@ -33,6 +33,17 @@ This addendum records the 2026-03-25 delivery set and corresponding archive path
 - `openspec/changes/archive/2026-03-25-risk-control-thresholds/task-risk-control`
 - `openspec/changes/archive/2026-03-26-admin-audit-log/admin-audit-log`
 
+## 2026-03-26 Additional Delivery
+
+- Hide frontend billing/package entrances for phase-1 launch.
+- Add per-user token budget override in admin user management.
+- Use effective token budget (user override > platform default) in quota checks and token summaries.
+
+### Additional Archive
+
+- `openspec/changes/archive/2026-03-26-phase1-no-billing-ui-and-user-token-budget/phase1-no-billing-ui-and-user-token-budget`
+- `openspec/changes/archive/2026-03-26-workspace-hard-delete/workspace-hard-delete`
+
 ## Execution Order (Locked)
 
 1. Fix admin alignment issues first and keep current pages stable.
