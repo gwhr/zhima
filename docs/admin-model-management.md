@@ -14,6 +14,7 @@
 4. 配置 DeepSeek / 智谱 Base URL
 5. 新增 / 编辑 / 删除 **OpenAI 兼容模型**（可配置 `modelId`、显示名、`modelName`、`baseUrl`、`apiKey`、输入/输出单价、启用状态）
 6. 自定义模型启用后自动进入“代码生成模型 / 论文生成模型”可选列表
+7. 每个模型支持“测试连接”，可在保存前先验证 Key + URL + Model Name 是否可用
 
 ## 3. Key 生效优先级
 
@@ -39,6 +40,7 @@
 
 - `GET /api/admin/models`
 - `PATCH /api/admin/models`
+- `POST /api/admin/models/test`
 
 PATCH 可更新：
 
@@ -58,6 +60,15 @@ PATCH 可更新：
   - `inputCostPerMToken`
   - `outputCostPerMToken`
   - `enabled`
+
+POST `/api/admin/models/test` 支持两类：
+
+1. 内置模型测试（`kind: builtin`）
+   - `modelId: opus | deepseek | glm`
+   - 可选传当前页面新填的 Key/Base URL 覆盖进行测试
+2. 自定义模型测试（`kind: custom`）
+   - `modelName` + `baseUrl` + `apiKey`（新模型推荐）
+   - 或 `modelId`（已保存模型可直接测试，未填新 Key 时回退后台已保存 Key）
 
 ## 6. 运行建议
 

@@ -62,6 +62,11 @@ type ModelsResponse = {
   customOpenAIModels?: CustomOpenAIModelView[];
 };
 
+type TestStatusState = {
+  ok: boolean;
+  text: string;
+};
+
 function sourceText(source: KeySource) {
   if (source === "admin") return "后台覆盖";
   if (source === "env") return "环境变量";
@@ -94,6 +99,10 @@ export default function AdminModelsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [testingTarget, setTestingTarget] = useState<string | null>(null);
+  const [testStatusMap, setTestStatusMap] = useState<
+    Record<string, TestStatusState>
+  >({});
 
   const [modelOptions, setModelOptions] = useState<ModelOptionDetail[]>([]);
   const [codeGenModelId, setCodeGenModelId] = useState("");
@@ -223,6 +232,13 @@ export default function AdminModelsPage() {
   }
 
   function removeCustomOpenAIModel(localId: string) {
+    const testKey = `custom:${localId}`;
+    setTestStatusMap((prev) => {
+      if (!(testKey in prev)) return prev;
+      const next = { ...prev };
+      delete next[testKey];
+      return next;
+    });
     setCustomOpenAIModels((prev) => {
       const target = prev.find((item) => item.localId === localId);
       if (target) {
@@ -247,6 +263,113 @@ export default function AdminModelsPage() {
           : item
       )
     );
+  }
+
+  function setTestStatus(
+    key: string,
+    status: TestStatusState | null
+  ) {
+    setTestStatusMap((prev) => {
+      const next = { ...prev };
+      if (!status) {
+        delete next[key];
+      } else {
+        next[key] = status;
+      }
+      return next;
+    });
+  }
+
+  async function testBuiltinModel(modelId: "opus" | "deepseek" | "glm") {
+    const key = `builtin:${modelId}`;
+    setTestingTarget(key);
+    setTestStatus(key, null);
+    try {
+      const payload: Record<string, unknown> = {
+        kind: "builtin",
+        modelId,
+      };
+      if (modelId === "opus" && anthropicApiKey.trim()) {
+        payload.anthropicApiKey = anthropicApiKey.trim();
+      }
+      if (modelId === "deepseek") {
+        if (deepseekApiKey.trim()) payload.deepseekApiKey = deepseekApiKey.trim();
+        payload.deepseekBaseUrl = deepseekBaseUrl.trim();
+      }
+      if (modelId === "glm") {
+        if (zhipuApiKey.trim()) payload.zhipuApiKey = zhipuApiKey.trim();
+        payload.zhipuBaseUrl = zhipuBaseUrl.trim();
+      }
+
+      const response = await fetch("/api/admin/models/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || "连接测试失败");
+      }
+      const data = result.data || {};
+      const latency = Number.isFinite(Number(data.latencyMs))
+        ? `${Math.round(Number(data.latencyMs))}ms`
+        : "-";
+      const preview = typeof data.preview === "string" ? data.preview : "";
+      setTestStatus(key, {
+        ok: true,
+        text: `连接成功（${latency}）${preview ? `，返回：${preview}` : ""}`,
+      });
+    } catch (err) {
+      setTestStatus(key, {
+        ok: false,
+        text: err instanceof Error ? err.message : "连接测试失败",
+      });
+    } finally {
+      setTestingTarget(null);
+    }
+  }
+
+  async function testCustomModel(item: CustomOpenAIModelForm) {
+    const key = `custom:${item.localId}`;
+    setTestingTarget(key);
+    setTestStatus(key, null);
+    try {
+      const payload: Record<string, unknown> = {
+        kind: "custom",
+        modelId: item.id.trim().toLowerCase(),
+        modelName: item.modelName.trim(),
+        baseUrl: item.baseUrl.trim(),
+      };
+      if (item.apiKey.trim()) {
+        payload.apiKey = item.apiKey.trim();
+      }
+
+      const response = await fetch("/api/admin/models/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || "连接测试失败");
+      }
+      const data = result.data || {};
+      const latency = Number.isFinite(Number(data.latencyMs))
+        ? `${Math.round(Number(data.latencyMs))}ms`
+        : "-";
+      const preview = typeof data.preview === "string" ? data.preview : "";
+      setTestStatus(key, {
+        ok: true,
+        text: `连接成功（${latency}）${preview ? `，返回：${preview}` : ""}`,
+      });
+    } catch (err) {
+      setTestStatus(key, {
+        ok: false,
+        text: err instanceof Error ? err.message : "连接测试失败",
+      });
+    } finally {
+      setTestingTarget(null);
+    }
   }
 
   const optionLabel = useMemo(
@@ -316,7 +439,21 @@ export default function AdminModelsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="rounded-md border p-3 space-y-2">
-            <div className="text-sm font-medium">Anthropic（opus）</div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-medium">Anthropic（opus）</div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void testBuiltinModel("opus")}
+                disabled={Boolean(testingTarget && testingTarget !== "builtin:opus")}
+              >
+                {testingTarget === "builtin:opus" && (
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                )}
+                测试连接
+              </Button>
+            </div>
             <div className="text-xs text-muted-foreground">
               当前：{providers.anthropicApiKeyMasked}（来源：{sourceText(providers.anthropicApiKeySource)}）
             </div>
@@ -326,10 +463,37 @@ export default function AdminModelsPage() {
               onChange={(event) => setAnthropicApiKey(event.target.value)}
               placeholder="输入新 Key（留空则不修改）"
             />
+            {testStatusMap["builtin:opus"] && (
+              <p
+                className={
+                  testStatusMap["builtin:opus"].ok
+                    ? "text-xs text-emerald-600"
+                    : "text-xs text-red-600"
+                }
+              >
+                {testStatusMap["builtin:opus"].text}
+              </p>
+            )}
           </div>
 
           <div className="rounded-md border p-3 space-y-2">
-            <div className="text-sm font-medium">DeepSeek</div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-medium">DeepSeek</div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void testBuiltinModel("deepseek")}
+                disabled={Boolean(
+                  testingTarget && testingTarget !== "builtin:deepseek"
+                )}
+              >
+                {testingTarget === "builtin:deepseek" && (
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                )}
+                测试连接
+              </Button>
+            </div>
             <div className="text-xs text-muted-foreground">
               当前：{providers.deepseekApiKeyMasked}（来源：{sourceText(providers.deepseekApiKeySource)}）
             </div>
@@ -344,10 +508,35 @@ export default function AdminModelsPage() {
               onChange={(event) => setDeepseekBaseUrl(event.target.value)}
               placeholder="DeepSeek Base URL"
             />
+            {testStatusMap["builtin:deepseek"] && (
+              <p
+                className={
+                  testStatusMap["builtin:deepseek"].ok
+                    ? "text-xs text-emerald-600"
+                    : "text-xs text-red-600"
+                }
+              >
+                {testStatusMap["builtin:deepseek"].text}
+              </p>
+            )}
           </div>
 
           <div className="rounded-md border p-3 space-y-2">
-            <div className="text-sm font-medium">智谱 GLM</div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-medium">智谱 GLM</div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void testBuiltinModel("glm")}
+                disabled={Boolean(testingTarget && testingTarget !== "builtin:glm")}
+              >
+                {testingTarget === "builtin:glm" && (
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                )}
+                测试连接
+              </Button>
+            </div>
             <div className="text-xs text-muted-foreground">
               当前：{providers.zhipuApiKeyMasked}（来源：{sourceText(providers.zhipuApiKeySource)}）
             </div>
@@ -362,6 +551,17 @@ export default function AdminModelsPage() {
               onChange={(event) => setZhipuBaseUrl(event.target.value)}
               placeholder="GLM Base URL"
             />
+            {testStatusMap["builtin:glm"] && (
+              <p
+                className={
+                  testStatusMap["builtin:glm"].ok
+                    ? "text-xs text-emerald-600"
+                    : "text-xs text-red-600"
+                }
+              >
+                {testStatusMap["builtin:glm"].text}
+              </p>
+            )}
           </div>
 
           <p className="text-xs text-muted-foreground">
@@ -382,15 +582,32 @@ export default function AdminModelsPage() {
             >
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium">自定义模型 #{index + 1}</p>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => removeCustomOpenAIModel(item.localId)}
-                >
-                  <Trash2 className="h-4 w-4 mr-1" />
-                  删除
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void testCustomModel(item)}
+                    disabled={Boolean(
+                      testingTarget &&
+                        testingTarget !== `custom:${item.localId}`
+                    )}
+                  >
+                    {testingTarget === `custom:${item.localId}` && (
+                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                    )}
+                    测试连接
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removeCustomOpenAIModel(item.localId)}
+                  >
+                    <Trash2 className="h-4 w-4 mr-1" />
+                    删除
+                  </Button>
+                </div>
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
@@ -511,6 +728,17 @@ export default function AdminModelsPage() {
                 />
                 启用该模型（启用后才会出现在代码/论文模型下拉中）
               </label>
+              {testStatusMap[`custom:${item.localId}`] && (
+                <p
+                  className={
+                    testStatusMap[`custom:${item.localId}`].ok
+                      ? "text-xs text-emerald-600"
+                      : "text-xs text-red-600"
+                  }
+                >
+                  {testStatusMap[`custom:${item.localId}`].text}
+                </p>
+              )}
             </div>
           ))}
 
