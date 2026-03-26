@@ -1,13 +1,13 @@
 import { db } from "@/lib/db";
-import { modelCosts, type ModelId } from "./providers";
 import type { AiTaskType } from "@prisma/client";
 import { getPlatformConfig } from "@/lib/system-config";
+import { getModelPricing } from "@/lib/model-catalog-config";
 
 interface UsageParams {
   userId: string;
   workspaceId: string;
   taskType: AiTaskType;
-  modelId: ModelId;
+  modelId: string;
   inputTokens: number;
   outputTokens: number;
   durationMs: number;
@@ -28,7 +28,7 @@ export function getDefaultUserTokenBudget(): number {
 }
 
 export async function recordUsage(params: UsageParams) {
-  const costs = modelCosts[params.modelId];
+  const costs = await getModelPricing(params.modelId);
   const costYuan =
     (params.inputTokens / 1_000_000) * costs.input +
     (params.outputTokens / 1_000_000) * costs.output;

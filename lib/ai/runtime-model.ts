@@ -1,32 +1,27 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
-import { getResolvedModelProviderConfig } from "@/lib/model-provider-config";
-import { models, type ModelId } from "@/lib/ai/providers";
+import type { LanguageModel } from "ai";
+import { getRuntimeModelDefinition } from "@/lib/model-catalog-config";
 
-export type RuntimeModel = (typeof models)[ModelId];
+export type RuntimeModel = LanguageModel;
 
-export async function getRuntimeModel(modelId: ModelId): Promise<RuntimeModel> {
-  const config = await getResolvedModelProviderConfig();
-
-  switch (modelId) {
-    case "opus":
-      return createAnthropic({
-        apiKey: config.anthropicApiKey,
-      })("claude-sonnet-4-20250514");
-    case "deepseek":
-      return createOpenAI({
-        apiKey: config.deepseekApiKey,
-        baseURL: config.deepseekBaseUrl,
-      }).chat("deepseek-chat");
-    case "glm":
-      return createOpenAI({
-        apiKey: config.zhipuApiKey,
-        baseURL: config.zhipuBaseUrl,
-      }).chat("glm-4-flash");
-    default:
-      return createOpenAI({
-        apiKey: config.deepseekApiKey,
-        baseURL: config.deepseekBaseUrl,
-      }).chat("deepseek-chat");
+export async function getRuntimeModel(modelId: string): Promise<RuntimeModel> {
+  let runtimeModel = await getRuntimeModelDefinition(modelId);
+  if (!runtimeModel && modelId !== "deepseek") {
+    runtimeModel = await getRuntimeModelDefinition("deepseek");
   }
+  if (!runtimeModel) {
+    throw new Error(`模型「${modelId}」未配置或已被禁用，且默认模型不可用`);
+  }
+
+  if (runtimeModel.provider === "anthropic") {
+    return createAnthropic({
+      apiKey: runtimeModel.apiKey,
+    })(runtimeModel.modelName);
+  }
+
+  return createOpenAI({
+    apiKey: runtimeModel.apiKey,
+    baseURL: runtimeModel.baseUrl,
+  }).chat(runtimeModel.modelName);
 }

@@ -1,5 +1,4 @@
 import { db } from "@/lib/db";
-import type { ModelId } from "@/lib/ai/providers";
 import type { Prisma } from "@prisma/client";
 
 const PLATFORM_CONFIG_KEY = "platform:settings";
@@ -37,8 +36,8 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
 
 export function getDefaultPlatformConfigFromEnv(): PlatformConfig {
   return {
-    codeGenModelId: (process.env.CODE_GEN_MODEL_ID || "deepseek") as ModelId,
-    thesisGenModelId: (process.env.THESIS_GEN_MODEL_ID || "glm") as ModelId,
+    codeGenModelId: process.env.CODE_GEN_MODEL_ID || "deepseek",
+    thesisGenModelId: process.env.THESIS_GEN_MODEL_ID || "glm",
     defaultUserTokenBudget: parsePositiveInt(
       process.env.DEFAULT_USER_TOKEN_BUDGET,
       500_000

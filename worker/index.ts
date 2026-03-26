@@ -17,8 +17,8 @@ import {
 import sharp from "sharp";
 import * as path from "path";
 import { uploadFile, downloadFile } from "../lib/storage/oss";
-import { modelCosts, type ModelId } from "../lib/ai/providers";
 import { getRuntimeModel, type RuntimeModel } from "../lib/ai/runtime-model";
+import { getModelPricing } from "../lib/model-catalog-config";
 
 function resolveRedisConnection() {
   const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
@@ -51,12 +51,12 @@ async function saveFile(key: string, content: string | Buffer) {
   return uploadFile(key, content);
 }
 
-const DEFAULT_CODE_MODEL_ID: ModelId = "deepseek";
-const DEFAULT_THESIS_MODEL_ID: ModelId = "glm";
+const DEFAULT_CODE_MODEL_ID = "deepseek";
+const DEFAULT_THESIS_MODEL_ID = "glm";
 
-function resolveModelId(value: string | undefined, fallback: ModelId): ModelId {
-  if (!value) return fallback;
-  return value in modelCosts ? (value as ModelId) : fallback;
+function resolveModelId(value: string | undefined, fallback: string): string {
+  if (!value || !value.trim()) return fallback;
+  return value.trim().toLowerCase();
 }
 
 const CODE_MODEL_ID = resolveModelId(
@@ -132,13 +132,13 @@ async function recordWorkerUsage(params: {
   userId: string;
   workspaceId: string;
   taskType: AiTaskType;
-  modelId: ModelId;
+  modelId: string;
   usage: TokenUsageSummary;
   durationMs: number;
 }) {
   if (params.usage.totalTokens <= 0) return;
 
-  const costs = modelCosts[params.modelId];
+  const costs = await getModelPricing(params.modelId);
   const costYuan =
     (params.usage.inputTokens / 1_000_000) * costs.input +
     (params.usage.outputTokens / 1_000_000) * costs.output;
@@ -162,7 +162,7 @@ async function updateJobProgress(
   progress: number,
   stage: string,
   detail: string,
-  modelOrExtras: ModelId | Record<string, unknown> = DEFAULT_CODE_MODEL_ID,
+  modelOrExtras: string | Record<string, unknown> = DEFAULT_CODE_MODEL_ID,
   extras: Record<string, unknown> = {}
 ) {
   const modelId =

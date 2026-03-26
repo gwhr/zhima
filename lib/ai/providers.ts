@@ -1,30 +1,66 @@
-import { createAnthropic } from "@ai-sdk/anthropic";
-import { createOpenAI } from "@ai-sdk/openai";
+export type ModelId = string;
 
-export const anthropic = createAnthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || "",
-});
+export type BuiltinModelId = "opus" | "deepseek" | "glm";
 
-export const deepseek = createOpenAI({
-  apiKey: process.env.DEEPSEEK_API_KEY || "",
-  baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com",
-});
+export interface BuiltinModelDefinition {
+  id: BuiltinModelId;
+  name: string;
+  provider: "anthropic" | "openai-compatible";
+  modelName: string;
+  defaultBaseUrl?: string;
+  inputCostPerMToken: number;
+  outputCostPerMToken: number;
+}
 
-export const zhipu = createOpenAI({
-  apiKey: process.env.ZHIPU_API_KEY || "",
-  baseURL: process.env.ZHIPU_BASE_URL || "https://open.bigmodel.cn/api/paas/v4",
-});
+export const builtinModelDefinitions: BuiltinModelDefinition[] = [
+  {
+    id: "opus",
+    name: "Claude Sonnet 4",
+    provider: "anthropic",
+    modelName: "claude-sonnet-4-20250514",
+    inputCostPerMToken: 0.015,
+    outputCostPerMToken: 0.075,
+  },
+  {
+    id: "deepseek",
+    name: "DeepSeek Chat",
+    provider: "openai-compatible",
+    modelName: "deepseek-chat",
+    defaultBaseUrl: "https://api.deepseek.com",
+    inputCostPerMToken: 0.001,
+    outputCostPerMToken: 0.002,
+  },
+  {
+    id: "glm",
+    name: "智谱 GLM-4-Flash",
+    provider: "openai-compatible",
+    modelName: "glm-4-flash",
+    defaultBaseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    inputCostPerMToken: 0,
+    outputCostPerMToken: 0,
+  },
+];
 
-export const models = {
-  opus: anthropic("claude-sonnet-4-20250514"),
-  deepseek: deepseek.chat("deepseek-chat"),
-  glm: zhipu.chat("glm-4-flash"),
-} as const;
+const builtinModelMap = new Map(
+  builtinModelDefinitions.map((item) => [item.id, item])
+);
 
-export type ModelId = keyof typeof models;
+export const builtinModelIds = builtinModelDefinitions.map((item) => item.id);
 
-export const modelCosts: Record<ModelId, { input: number; output: number }> = {
-  opus: { input: 0.015, output: 0.075 },
-  deepseek: { input: 0.001, output: 0.002 },
-  glm: { input: 0, output: 0 },
-};
+export function getBuiltinModelDefinition(
+  modelId: string
+): BuiltinModelDefinition | null {
+  return builtinModelMap.get(modelId as BuiltinModelId) ?? null;
+}
+
+export function getBuiltinModelPricing(modelId: string): {
+  input: number;
+  output: number;
+} | null {
+  const model = getBuiltinModelDefinition(modelId);
+  if (!model) return null;
+  return {
+    input: model.inputCostPerMToken,
+    output: model.outputCostPerMToken,
+  };
+}

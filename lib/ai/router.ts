@@ -1,11 +1,10 @@
 import { db } from "@/lib/db";
-import { type ModelId } from "./providers";
 import { getRuntimeModel, type RuntimeModel } from "./runtime-model";
 import type { AiTaskType } from "@prisma/client";
 
 type QuotaStage = "normal" | "tightened" | "economy" | "exceeded";
 
-const modelMatrix: Record<QuotaStage, Partial<Record<AiTaskType, ModelId>>> = {
+const modelMatrix: Record<QuotaStage, Partial<Record<AiTaskType, string>>> = {
   normal: {
     CODE_GEN: "deepseek",
     THESIS: "glm",
@@ -32,7 +31,7 @@ const modelMatrix: Record<QuotaStage, Partial<Record<AiTaskType, ModelId>>> = {
   },
 };
 
-const defaultModel: ModelId = "deepseek";
+const defaultModel = "deepseek";
 
 export function getQuotaStage(used: number, budget: number): QuotaStage {
   if (budget <= 0) return "normal";
@@ -47,7 +46,7 @@ export async function selectModel(
   userId: string,
   workspaceId: string,
   taskType: AiTaskType
-): Promise<{ model: RuntimeModel; modelId: ModelId; stage: QuotaStage }> {
+): Promise<{ model: RuntimeModel; modelId: string; stage: QuotaStage }> {
   const quota = await db.userQuota.findUnique({
     where: { userId_workspaceId: { userId, workspaceId } },
   });

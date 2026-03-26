@@ -1,16 +1,17 @@
 import { requireAdmin } from "@/lib/auth-helpers";
 import { success, error } from "@/lib/api-response";
 import { getPlatformConfig, savePlatformConfig } from "@/lib/system-config";
-import { models } from "@/lib/ai/providers";
+import { listModelOptionIds } from "@/lib/model-catalog-config";
 import { logAdminAudit } from "@/lib/admin-audit";
-
-const modelIds = Object.keys(models);
 
 export async function GET() {
   const { error: authError } = await requireAdmin();
   if (authError) return authError;
 
-  const config = await getPlatformConfig();
+  const [config, modelIds] = await Promise.all([
+    getPlatformConfig(),
+    listModelOptionIds(),
+  ]);
   return success({
     config,
     modelOptions: modelIds,
@@ -25,6 +26,8 @@ export async function PATCH(req: Request) {
     | Record<string, unknown>
     | null;
   if (!body) return error("请求参数无效", 400);
+
+  const modelIds = await listModelOptionIds();
 
   const patch: Record<string, unknown> = {};
   const positiveNumberKeys = [
