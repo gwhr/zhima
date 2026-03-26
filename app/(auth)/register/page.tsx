@@ -55,7 +55,11 @@ export default function RegisterPage() {
       return;
     }
 
-    const result = await signIn("email-login", { email, password, redirect: false });
+    const result = await signIn("email-login", {
+      identifier: email,
+      password,
+      redirect: false,
+    });
     setLoading(false);
     if (result?.error) {
       setError("注册成功，请手动登录");

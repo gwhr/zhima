@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import {
   BarChart3,
   Bell,
+  Bot,
   ClipboardList,
   FolderKanban,
   KeyRound,
@@ -22,6 +23,7 @@ const adminNav = [
   { href: "/admin/tasks", icon: ListChecks, label: "任务中心" },
   { href: "/admin/usage", icon: BarChart3, label: "Token 用量" },
   { href: "/admin/orders", icon: Receipt, label: "订单管理" },
+  { href: "/admin/models", icon: Bot, label: "模型管理" },
   { href: "/admin/templates", icon: LayoutTemplate, label: "论文模板" },
   { href: "/admin/announcements", icon: Bell, label: "系统公告" },
   { href: "/admin/platform", icon: KeyRound, label: "平台配置" },

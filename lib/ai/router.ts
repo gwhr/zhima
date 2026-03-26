@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
-import { models, type ModelId } from "./providers";
+import { type ModelId } from "./providers";
+import { getRuntimeModel, type RuntimeModel } from "./runtime-model";
 import type { AiTaskType } from "@prisma/client";
 
 type QuotaStage = "normal" | "tightened" | "economy" | "exceeded";
@@ -46,7 +47,7 @@ export async function selectModel(
   userId: string,
   workspaceId: string,
   taskType: AiTaskType
-): Promise<{ model: (typeof models)[ModelId]; modelId: ModelId; stage: QuotaStage }> {
+): Promise<{ model: RuntimeModel; modelId: ModelId; stage: QuotaStage }> {
   const quota = await db.userQuota.findUnique({
     where: { userId_workspaceId: { userId, workspaceId } },
   });
@@ -57,11 +58,11 @@ export async function selectModel(
 
   const stageMatrix = modelMatrix[stage];
   const modelId = stageMatrix[taskType] || defaultModel;
+  const model = await getRuntimeModel(modelId);
 
   return {
-    model: models[modelId],
+    model,
     modelId,
     stage,
   };
 }
-

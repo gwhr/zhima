@@ -1,6 +1,6 @@
 import { generateText } from "ai";
 import { requireAuth } from "@/lib/auth-helpers";
-import { models } from "@/lib/ai/providers";
+import { getRuntimeModel } from "@/lib/ai/runtime-model";
 
 export async function POST(req: Request) {
   const { error: authError } = await requireAuth();
@@ -24,8 +24,10 @@ export async function POST(req: Request) {
 专业分类：计算机相关专业。
 可以覆盖常见软件工程方向题目，兼顾工程实践与技术深度。`;
 
+  const model = await getRuntimeModel("glm");
+
   const { text } = await generateText({
-    model: models.glm,
+    model,
     prompt: `你是毕业设计选题专家。用户输入了方向关键词："${keyword}"
 ${categoryPrompt}
 

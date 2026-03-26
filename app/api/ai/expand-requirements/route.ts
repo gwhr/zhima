@@ -1,6 +1,6 @@
 import { generateText } from "ai";
 import { requireAuth } from "@/lib/auth-helpers";
-import { models } from "@/lib/ai/providers";
+import { getRuntimeModel } from "@/lib/ai/runtime-model";
 
 export async function POST(req: Request) {
   const { error: authError } = await requireAuth();
@@ -30,8 +30,10 @@ export async function POST(req: Request) {
 专业分类：计算机相关专业。
 需求可包含标准的软件工程实践内容，兼顾功能完整性与工程实现。`;
 
+  const model = await getRuntimeModel("glm");
+
   const { text } = await generateText({
-    model: models.glm,
+    model,
     prompt: `你是毕业设计需求分析专家。请为以下选题生成需求清单。
 
 选题：${topic}

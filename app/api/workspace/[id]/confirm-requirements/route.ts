@@ -2,7 +2,7 @@ import { generateText } from "ai";
 import { db } from "@/lib/db";
 import { success, error } from "@/lib/api-response";
 import { requireAuth } from "@/lib/auth-helpers";
-import { models } from "@/lib/ai/providers";
+import { getRuntimeModel } from "@/lib/ai/runtime-model";
 import { buildFeasibilityPrompt } from "@/lib/ai/prompts/feasibility-evaluate";
 
 type DifficultyAssessment = {
@@ -178,8 +178,9 @@ async function evaluateDifficulty(
 - ${buildMajorCategoryContext(requirements.majorCategory || "computer")}
 `;
 
+  const model = await getRuntimeModel("glm");
   const { text } = await generateText({
-    model: models.glm,
+    model,
     prompt: `${basePrompt}\n${context}`,
   });
 
@@ -270,8 +271,9 @@ export async function POST(
   if (action === "revise") {
     if (!userIdea) return error("请输入你的修改想法", 400);
 
+    const model = await getRuntimeModel("glm");
     const { text } = await generateText({
-      model: models.glm,
+      model,
       prompt: buildRevisePrompt(
         workspace.topic,
         (workspace.techStack as Record<string, unknown>) || {},

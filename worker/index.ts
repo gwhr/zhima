@@ -17,7 +17,8 @@ import {
 import sharp from "sharp";
 import * as path from "path";
 import { uploadFile, downloadFile } from "../lib/storage/oss";
-import { modelCosts, models, type ModelId } from "../lib/ai/providers";
+import { modelCosts, type ModelId } from "../lib/ai/providers";
+import { getRuntimeModel, type RuntimeModel } from "../lib/ai/runtime-model";
 
 function resolveRedisConnection() {
   const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
@@ -55,7 +56,7 @@ const DEFAULT_THESIS_MODEL_ID: ModelId = "glm";
 
 function resolveModelId(value: string | undefined, fallback: ModelId): ModelId {
   if (!value) return fallback;
-  return value in models ? (value as ModelId) : fallback;
+  return value in modelCosts ? (value as ModelId) : fallback;
 }
 
 const CODE_MODEL_ID = resolveModelId(
@@ -66,47 +67,11 @@ const THESIS_MODEL_ID = resolveModelId(
   process.env.THESIS_GEN_MODEL_ID,
   DEFAULT_THESIS_MODEL_ID
 );
-const WORKER_MODEL_ID: ModelId = CODE_MODEL_ID;
 const DEFAULT_SINGLE_TASK_TOKEN_HARD_LIMIT = Number.isFinite(
   Number(process.env.SINGLE_TASK_TOKEN_HARD_LIMIT)
 )
   ? Math.max(1_000, Number(process.env.SINGLE_TASK_TOKEN_HARD_LIMIT))
   : 240_000;
-
-function getModelForJob(
-  jobName: string
-): {
-  modelId: ModelId;
-  model: (typeof models)[ModelId];
-  taskType: AiTaskType;
-} {
-  switch (jobName) {
-    case "code-gen":
-      return {
-        modelId: CODE_MODEL_ID,
-        model: models[CODE_MODEL_ID],
-        taskType: "CODE_GEN",
-      };
-    case "thesis-gen":
-      return {
-        modelId: THESIS_MODEL_ID,
-        model: models[THESIS_MODEL_ID],
-        taskType: "THESIS",
-      };
-    case "chart-render":
-      return {
-        modelId: THESIS_MODEL_ID,
-        model: models[THESIS_MODEL_ID],
-        taskType: "CHART",
-      };
-    default:
-      return {
-        modelId: CODE_MODEL_ID,
-        model: models[CODE_MODEL_ID],
-        taskType: "MODIFY_SIMPLE",
-      };
-  }
-}
 
 type UsageLike = {
   inputTokens?: number;
@@ -427,7 +392,7 @@ File: 相对路径
 async function generateCodeFilesWithRetry(
   workspace: { name: string; topic: string; techStack: unknown; requirements: unknown },
   techStack: Record<string, string>,
-  selectedModel: (typeof models)[ModelId],
+  selectedModel: RuntimeModel,
   singleTaskTokenHardLimit: number
 ): Promise<{
   files: ParsedFile[];
@@ -672,7 +637,7 @@ const worker = new Worker(
           );
 
           const codeModelId = resolveModelId(job.data.modelId, CODE_MODEL_ID);
-          const codeModel = models[codeModelId];
+          const codeModel = await getRuntimeModel(codeModelId);
           const codeTaskType: AiTaskType = "CODE_GEN";
           const codeStartAt = Date.now();
           const techStack = workspace.techStack as Record<string, string>;
@@ -761,7 +726,7 @@ const worker = new Worker(
 
         case "thesis-gen": {
           const thesisModelId = resolveModelId(job.data.modelId, THESIS_MODEL_ID);
-          const thesisModel = models[thesisModelId];
+          const thesisModel = await getRuntimeModel(thesisModelId);
           const thesisTaskType: AiTaskType = "THESIS";
           const thesisStartAt = Date.now();
           let thesisUsage: TokenUsageSummary = {
@@ -1097,7 +1062,7 @@ ${projectContext}
               result: {
                 stage: "图表生成完成",
                 detail: `共生成 ${svgs.length} 张图`,
-                model: WORKER_MODEL_ID,
+                model: resolveModelId(job.data.modelId, THESIS_MODEL_ID),
                 chartCount: svgs.length,
               },
             },
@@ -1123,7 +1088,7 @@ ${projectContext}
               result: {
                 stage: "预览准备完成",
                 detail: "预览功能已就绪",
-                model: WORKER_MODEL_ID,
+                model: resolveModelId(job.data.modelId, CODE_MODEL_ID),
                 message: "预览功能已就绪",
               },
             },
@@ -1153,7 +1118,7 @@ ${projectContext}
             detail: willRetry
               ? `${message}（准备重试 ${currentAttempt}/${totalAttempts}）`
               : message,
-            model: WORKER_MODEL_ID,
+            model: resolveModelId(job.data.modelId, CODE_MODEL_ID),
             attemptsMade: currentAttempt,
             attemptsTotal: totalAttempts,
             retrying: willRetry,
