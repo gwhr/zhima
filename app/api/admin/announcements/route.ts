@@ -2,6 +2,7 @@ import { requireAdmin } from "@/lib/auth-helpers";
 import { success, error } from "@/lib/api-response";
 import { db } from "@/lib/db";
 import type { AnnouncementLevel } from "@prisma/client";
+import { logAdminAudit } from "@/lib/admin-audit";
 
 const allowedLevels: AnnouncementLevel[] = ["INFO", "WARNING", "MAINTENANCE"];
 
@@ -85,6 +86,26 @@ export async function POST(req: Request) {
       })),
     });
   }
+
+  await logAdminAudit({
+    adminUserId: session!.user.id,
+    action: "announcement.publish",
+    module: "announcements",
+    targetType: "Announcement",
+    targetId: announcement.id,
+    summary: `发布公告：${title}`,
+    after: {
+      id: announcement.id,
+      title,
+      level,
+      targetCount: targetUserIds.length,
+    },
+    metadata: {
+      targetUserScope: body.userId?.trim() ? "single" : "all",
+      targetCount: targetUserIds.length,
+    },
+    req,
+  });
 
   return success({
     announcementId: announcement.id,

@@ -2,6 +2,7 @@ import { requireAdmin } from "@/lib/auth-helpers";
 import { success, error } from "@/lib/api-response";
 import { getPlatformConfig, savePlatformConfig } from "@/lib/system-config";
 import { models } from "@/lib/ai/providers";
+import { logAdminAudit } from "@/lib/admin-audit";
 
 const modelIds = Object.keys(models);
 
@@ -17,7 +18,7 @@ export async function GET() {
 }
 
 export async function PATCH(req: Request) {
-  const { error: authError } = await requireAdmin();
+  const { session, error: authError } = await requireAdmin();
   if (authError) return authError;
 
   const body = (await req.json().catch(() => null)) as
@@ -78,6 +79,23 @@ export async function PATCH(req: Request) {
     patch.maintenanceNoticeText = String(body.maintenanceNoticeText || "").trim();
   }
 
+  const beforeConfig = await getPlatformConfig();
   const config = await savePlatformConfig(patch);
+
+  await logAdminAudit({
+    adminUserId: session!.user.id,
+    action: "platform.config.update",
+    module: "platform",
+    targetType: "SystemConfig",
+    targetId: "platform:settings",
+    summary: "更新平台配置",
+    before: beforeConfig,
+    after: config,
+    metadata: {
+      changedKeys: Object.keys(patch),
+    },
+    req,
+  });
+
   return success({ config });
 }

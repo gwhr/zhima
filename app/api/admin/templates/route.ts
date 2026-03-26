@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/auth-helpers";
 import { success, error } from "@/lib/api-response";
 import { db } from "@/lib/db";
 import { uploadFile } from "@/lib/storage/oss";
+import { logAdminAudit } from "@/lib/admin-audit";
 
 const MAX_TEMPLATE_SIZE = 20 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = new Set([".doc", ".docx"]);
@@ -103,6 +104,22 @@ export async function POST(req: Request) {
         createdAt: true,
       },
     });
+  });
+
+  await logAdminAudit({
+    adminUserId: session!.user.id,
+    action: "template.upload",
+    module: "templates",
+    targetType: "ThesisTemplate",
+    targetId: created.id,
+    summary: `上传论文模板：${created.name}`,
+    after: created,
+    metadata: {
+      activateNow,
+      fileName: file.name,
+      fileSize: file.size,
+    },
+    req,
   });
 
   return success(created, 201);

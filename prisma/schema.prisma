@@ -102,9 +102,31 @@ model User {
   inviteCodes   InviteCode[]
   thesisTemplates ThesisTemplate[] @relation("TemplateCreator")
   announcements   Announcement[]   @relation("AnnouncementCreator")
+  adminAuditLogs  AdminAuditLog[]  @relation("AdminAuditActor")
 
   @@index([email])
   @@index([phone])
+}
+
+model AdminAuditLog {
+  id          String   @id @default(cuid())
+  adminUserId String?
+  action      String
+  module      String?
+  targetType  String?
+  targetId    String?
+  summary     String?
+  before      Json?
+  after       Json?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  adminUser User? @relation("AdminAuditActor", fields: [adminUserId], references: [id], onDelete: SetNull)
+
+  @@index([adminUserId])
+  @@index([action])
+  @@index([module])
+  @@index([createdAt])
 }
 
 model Workspace {

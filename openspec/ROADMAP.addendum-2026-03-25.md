@@ -22,11 +22,16 @@ This addendum records the 2026-03-25 delivery set and corresponding archive path
   - platform: default user concurrency / retry limit / single-task token hard cap
   - user-level concurrency override (`/api/admin/users/[id]/risk-control`)
   - queue dispatch guard and worker hard-cap stop
+- Admin audit logs (lightweight P0)
+  - new `AdminAuditLog` model and shared logger utility
+  - key admin write ops are logged (platform, user risk control, templates, announcements)
+  - admin log page (`/admin/audit-logs`) and query API (`/api/admin/audit-logs`)
 
 ## Archive
 
 - `openspec/changes/archive/2026-03-25-admin-p0-upgrade/admin-p0-platform`
 - `openspec/changes/archive/2026-03-25-risk-control-thresholds/task-risk-control`
+- `openspec/changes/archive/2026-03-26-admin-audit-log/admin-audit-log`
 
 ## Execution Order (Locked)
 

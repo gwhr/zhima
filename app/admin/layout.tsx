@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import {
   BarChart3,
   Bell,
+  ClipboardList,
   FolderKanban,
   KeyRound,
   LayoutTemplate,
@@ -24,6 +25,7 @@ const adminNav = [
   { href: "/admin/templates", icon: LayoutTemplate, label: "论文模板" },
   { href: "/admin/announcements", icon: Bell, label: "系统公告" },
   { href: "/admin/platform", icon: KeyRound, label: "平台配置" },
+  { href: "/admin/audit-logs", icon: ClipboardList, label: "操作日志" },
 ];
 
 export default async function AdminLayout({
