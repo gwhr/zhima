@@ -9,9 +9,12 @@ export default function DashboardLayout({
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
-      <div className="flex flex-1">
+      <div className="mx-auto flex w-full max-w-[1680px] flex-1">
         <Sidebar />
-        <main className="flex-1 overflow-auto">{children}</main>
+        <main className="relative flex-1 overflow-auto">
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-48 bg-gradient-to-b from-white/70 to-transparent" />
+          <div className="relative">{children}</div>
+        </main>
       </div>
     </div>
   );

@@ -414,17 +414,20 @@ export default function WorkspaceDetailPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => router.push("/workspace")}>
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div className="flex-1">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold">{workspace.name}</h1>
-            <Badge variant={status.variant}>{status.label}</Badge>
+    <div className="space-y-6 p-6 md:space-y-7 md:p-8">
+      <div className="relative overflow-hidden rounded-3xl border border-white/80 bg-white/80 p-5 shadow-[0_28px_60px_-40px_rgba(15,23,42,0.45)] backdrop-blur-sm md:p-6">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_right_top,rgba(14,165,164,0.16),transparent_52%),radial-gradient(circle_at_left_bottom,rgba(249,115,22,0.12),transparent_42%)]" />
+        <div className="relative flex items-center gap-3">
+          <Button variant="ghost" size="icon" onClick={() => router.push("/workspace")}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div className="flex-1">
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-semibold tracking-tight">{workspace.name}</h1>
+              <Badge variant={status.variant}>{status.label}</Badge>
+            </div>
+            <p className="text-sm text-muted-foreground mt-1">{workspace.topic}</p>
           </div>
-          <p className="text-sm text-muted-foreground mt-1">{workspace.topic}</p>
         </div>
       </div>
 
@@ -433,7 +436,7 @@ export default function WorkspaceDetailPage() {
         <div className="lg:col-span-2 space-y-6">
           {/* Project Overview */}
           {workspace.requirements && (workspace.requirements.roles?.length || workspace.requirements.modules?.length) && (
-            <Card>
+            <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <Layers className="h-4 w-4" />
@@ -539,7 +542,7 @@ export default function WorkspaceDetailPage() {
           )}
 
           {/* Feature confirmation gate */}
-          <Card>
+          <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">功能确认</CardTitle>
               <p className="text-xs text-muted-foreground mt-1">
@@ -637,7 +640,7 @@ export default function WorkspaceDetailPage() {
           </Card>
 
           {/* Actions - Step by step guide */}
-          <Card>
+          <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">操作</CardTitle>
               <p className="text-xs text-muted-foreground mt-1">按顺序点击下方按钮，AI 将为你逐步生成毕设所需内容</p>
@@ -773,7 +776,7 @@ export default function WorkspaceDetailPage() {
           </Card>
 
           {/* Chat */}
-          <Card className="h-[480px] flex flex-col">
+          <Card className="h-[480px] flex flex-col border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
             <CardHeader className="pb-2">
               <CardTitle className="text-base">AI 对话</CardTitle>
             </CardHeader>
@@ -790,7 +793,7 @@ export default function WorkspaceDetailPage() {
         {/* Right sidebar */}
         <div className="space-y-6">
           {/* Download packages */}
-          <Card>
+          <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">项目文件</CardTitle>
               <p className="text-xs text-muted-foreground mt-1">生成完成后可下载对应的压缩包</p>
@@ -936,7 +939,7 @@ export default function WorkspaceDetailPage() {
           </Card>
 
           {/* Stats */}
-          <Card>
+          <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">统计</CardTitle>
             </CardHeader>

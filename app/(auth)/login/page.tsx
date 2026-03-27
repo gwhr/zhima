@@ -110,22 +110,34 @@ export default function LoginPage() {
   }
 
   return (
-    <Card className="w-full max-w-md border-0 shadow-none lg:border lg:shadow-sm">
-      <CardHeader className="text-center">
-        <CardTitle className="text-2xl font-bold">登录智码</CardTitle>
-        <CardDescription>选择你喜欢的方式登录</CardDescription>
+    <Card className="w-full max-w-md border-white/80 bg-white/88 shadow-[0_28px_65px_-42px_rgba(15,23,42,0.6)] backdrop-blur-sm">
+      <CardHeader className="pb-4 text-center">
+        <CardTitle className="text-2xl font-semibold tracking-tight">登录智码</CardTitle>
+        <CardDescription className="text-sm text-muted-foreground">
+          选择你习惯的方式，继续你的项目开发
+        </CardDescription>
       </CardHeader>
 
       <Tabs defaultValue="account" className="w-full">
         <div className="px-6">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="account">账号登录</TabsTrigger>
-            <TabsTrigger value="phone">手机号登录</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-2 rounded-xl bg-muted/60 p-1">
+            <TabsTrigger
+              value="account"
+              className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm"
+            >
+              账号登录
+            </TabsTrigger>
+            <TabsTrigger
+              value="phone"
+              className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm"
+            >
+              手机号登录
+            </TabsTrigger>
           </TabsList>
         </div>
 
         {error && (
-          <div className="mx-6 mt-4 rounded-md bg-red-50 p-3 text-sm text-red-600">
+          <div className="mx-6 mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-600">
             {error}
           </div>
         )}
@@ -193,7 +205,7 @@ export default function LoginPage() {
                   <Button
                     type="button"
                     variant="outline"
-                    className="shrink-0 w-28"
+                    className="w-28 shrink-0"
                     onClick={sendCode}
                     disabled={codeSending || countdown > 0}
                   >

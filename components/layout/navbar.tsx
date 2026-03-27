@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,26 +15,53 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { NotificationBell } from "@/components/notification-bell";
 import { Code2, LogOut, User } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+const navItems = [
+  { href: "/dashboard", label: "仪表盘" },
+  { href: "/workspace", label: "工作空间" },
+];
 
 export function Navbar() {
+  const pathname = usePathname();
   const { data: session } = useSession();
-  const initials = (session?.user?.name || session?.user?.email || "U").slice(0, 2).toUpperCase();
+  const initials = (session?.user?.name || session?.user?.email || "U")
+    .slice(0, 2)
+    .toUpperCase();
 
   return (
-    <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="flex h-14 items-center px-4 lg:px-6">
-        <Link href="/dashboard" className="flex items-center gap-2 font-bold text-lg">
-          <Code2 className="h-6 w-6 text-primary" />
-          <span>智码</span>
+    <header className="sticky top-0 z-40 border-b border-white/70 bg-white/80 shadow-[0_8px_30px_-24px_rgba(15,23,42,0.5)] backdrop-blur-xl supports-[backdrop-filter]:bg-white/65">
+      <div className="flex h-16 items-center gap-3 px-4 lg:px-6">
+        <Link
+          href="/dashboard"
+          className="group flex items-center gap-2.5 rounded-xl px-1 py-1"
+        >
+          <span className="flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500 to-teal-500 text-white shadow-md shadow-cyan-500/25 transition-transform group-hover:scale-105">
+            <Code2 className="h-5 w-5" />
+          </span>
+          <span className="text-lg font-semibold tracking-tight">智码</span>
         </Link>
 
-        <nav className="ml-8 hidden md:flex items-center gap-6 text-sm">
-          <Link href="/dashboard" className="text-muted-foreground hover:text-foreground transition-colors">
-            仪表盘
-          </Link>
-          <Link href="/workspace" className="text-muted-foreground hover:text-foreground transition-colors">
-            工作空间
-          </Link>
+        <nav className="ml-2 hidden items-center gap-2 md:flex">
+          {navItems.map((item) => {
+            const active =
+              pathname === item.href ||
+              (item.href !== "/dashboard" && pathname.startsWith(item.href));
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  "rounded-full px-3 py-1.5 text-sm transition-colors",
+                  active
+                    ? "bg-primary/12 text-primary"
+                    : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                )}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
         </nav>
 
         <div className="ml-auto flex items-center gap-3">
@@ -42,7 +70,10 @@ export function Navbar() {
               <NotificationBell />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="relative h-9 w-9 rounded-full">
+                  <Button
+                    variant="ghost"
+                    className="relative h-9 w-9 rounded-full border border-transparent bg-white/70 hover:border-border/70 hover:bg-white"
+                  >
                     <Avatar className="h-9 w-9">
                       <AvatarFallback className="bg-primary text-primary-foreground text-xs">
                         {initials}
