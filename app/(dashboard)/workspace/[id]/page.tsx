@@ -146,21 +146,39 @@ export default function WorkspaceDetailPage() {
   const templateInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadData = useCallback(async () => {
-    const [wsRes, filesRes, jobsRes, tokenRes] = await Promise.all([
-      fetch(`/api/workspace/${params.id}`),
-      fetch(`/api/workspace/${params.id}/files`),
-      fetch(`/api/workspace/${params.id}/jobs`),
-      fetch("/api/billing/tokens"),
-    ]);
-    const [wsData, filesData, jobsData, tokenData] = await Promise.all([
-      wsRes.json(), filesRes.json(), jobsRes.json(), tokenRes.json(),
-    ]);
+    setLoading(true);
+    try {
+      const [wsRes, filesRes, jobsRes, tokenRes] = await Promise.all([
+        fetch(`/api/workspace/${params.id}`),
+        fetch(`/api/workspace/${params.id}/files`),
+        fetch(`/api/workspace/${params.id}/jobs`),
+        fetch("/api/billing/tokens"),
+      ]);
 
-    if (wsData.success) setWorkspace(wsData.data);
-    if (filesData.success) setFiles(filesData.data);
-    if (jobsData.success) setJobs(jobsData.data);
-    if (tokenData.success) setTokenSummary(tokenData.data);
-    setLoading(false);
+      const parseJsonSafe = async (res: Response) => {
+        try {
+          return await res.json();
+        } catch {
+          return null;
+        }
+      };
+
+      const [wsData, filesData, jobsData, tokenData] = await Promise.all([
+        parseJsonSafe(wsRes),
+        parseJsonSafe(filesRes),
+        parseJsonSafe(jobsRes),
+        parseJsonSafe(tokenRes),
+      ]);
+
+      if (wsData?.success) setWorkspace(wsData.data);
+      if (filesData?.success) setFiles(filesData.data);
+      if (jobsData?.success) setJobs(jobsData.data);
+      if (tokenData?.success) setTokenSummary(tokenData.data);
+    } catch (err) {
+      console.error("Failed to load workspace detail:", err);
+    } finally {
+      setLoading(false);
+    }
   }, [params.id]);
 
   useEffect(() => {
