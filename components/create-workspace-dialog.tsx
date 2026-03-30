@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -28,6 +29,7 @@ import {
   Star,
   CheckCircle2,
   Sparkles,
+  RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -101,6 +103,7 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
   // Step 1: keyword
   const [keyword, setKeyword] = useState("");
   const [suggestions, setSuggestions] = useState<TopicSuggestion[]>([]);
+  const [topicBatch, setTopicBatch] = useState(1);
 
   // Step 2: topic
   const [selectedTopic, setSelectedTopic] = useState("");
@@ -120,6 +123,7 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
     setStep("keyword");
     setKeyword("");
     setSuggestions([]);
+    setTopicBatch(1);
     setSelectedTopic("");
     setCustomTopic("");
     setMajorCategory("computer");
@@ -152,8 +156,11 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
     };
   }
 
-  async function searchTopics() {
+  async function searchTopics(options?: { append?: boolean }) {
     if (!keyword.trim()) return;
+    const append = options?.append ?? false;
+    const nextBatch = append ? topicBatch + 1 : 1;
+    const existingTitles = append ? suggestions.map((item) => item.title) : [];
     setLoading(true);
     setError("");
     const stopHints = startHintCycle(searchHints);
@@ -161,16 +168,46 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
       const res = await fetch("/api/ai/recommend-topics", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keyword, majorCategory }),
+        body: JSON.stringify({
+          keyword,
+          majorCategory,
+          batch: nextBatch,
+          excludeTitles: existingTitles,
+        }),
       });
       const data = await res.json();
-      if (data.success && data.data.length > 0) {
-        setSuggestions(data.data);
+      const incoming: TopicSuggestion[] = Array.isArray(data?.data) ? data.data : [];
+      if (data.success && incoming.length > 0) {
+        if (append) {
+          const existingSet = new Set(
+            suggestions.map((item) => item.title.trim().toLowerCase())
+          );
+          const newItems = incoming.filter(
+            (item) => !existingSet.has(item.title.trim().toLowerCase())
+          );
+
+          if (newItems.length === 0) {
+            setError("暂时没有更多不同题目了，建议换个关键词再试");
+          } else {
+            setSuggestions((prev) => [...prev, ...newItems]);
+            setTopicBatch(nextBatch);
+          }
+        } else {
+          setSuggestions(incoming);
+          setSelectedTopic("");
+          setCustomTopic("");
+          setTopicBatch(1);
+        }
         setStep("pick-topic");
       } else {
+        if (append) {
+          setError("没有更多推荐了，你可以换个关键词再试");
+        } else {
         setError("未获取到推荐题目，请尝试其他关键词或直接输入题目");
         setSuggestions([]);
+        setTopicBatch(1);
         setStep("pick-topic");
+      }
       }
     } catch {
       setError("请求失败，请重试");
@@ -266,6 +303,9 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
             {step === "requirements" && "需求确认"}
             {step === "confirm" && "创建确认"}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            按步骤创建工作空间：选题、技术栈、需求确认与创建。
+          </DialogDescription>
         </DialogHeader>
 
         {error && (
@@ -276,16 +316,21 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
         {step === "keyword" && (
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              输入你感兴趣的方向或关键词，AI 帮你推荐毕设题目
+              输入业务场景关键词，AI 会按“信息系统/软件类毕设”方向给你推荐选题
             </p>
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-2.5">
+              <p className="text-xs text-blue-700">
+                当前版本仅开放信息系统/软件工程方向（用户端 + 管理端 + 数据库）。目标检测等算法研究方向将后续新增。
+              </p>
+            </div>
             <div className="flex gap-2">
               <Input
-                placeholder="如：外卖、学生管理、电商、游戏..."
+                placeholder="如：外卖运营、校园服务、预约管理、二手交易..."
                 value={keyword}
                 onChange={(e) => setKeyword(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && searchTopics()}
               />
-              <Button onClick={searchTopics} disabled={loading || !keyword.trim()}>
+              <Button onClick={() => void searchTopics()} disabled={loading || !keyword.trim()}>
                 {loading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
@@ -327,8 +372,27 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
             {suggestions.length > 0 && (
               <>
                 <p className="text-sm text-muted-foreground">
-                  AI 为你推荐了以下题目，点击选择。选好后下一步会看到完整的功能清单，你可以自由增减。
+                  AI 已按信息系统/软件类方向推荐题目，点击选择。选好后下一步会看到完整功能清单，你可以自由增减。
                 </p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-muted-foreground">
+                    已为你推荐 {suggestions.length} 个题目（第 {topicBatch} 批）
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={loading || !keyword.trim()}
+                    onClick={() => searchTopics({ append: true })}
+                  >
+                    {loading ? (
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                    )}
+                    再来一批
+                  </Button>
+                </div>
                 <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
                   {suggestions.map((s, i) => (
                     <div
@@ -402,7 +466,7 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
                 }}
               />
               <p className="text-xs text-muted-foreground">
-                不用担心写得不够完整，下一步 AI 会帮你分析出所有功能模块，你可以自由调整
+                不用担心写得不够完整。若题目偏算法研究，系统会自动转成可交付的信息系统方案供你继续完善。
               </p>
             </div>
 
@@ -553,6 +617,11 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
               <p className="text-sm font-medium">{finalTopic}</p>
               <p className="text-xs text-muted-foreground mt-1">
                 {requirements.summary}
+              </p>
+            </div>
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-2.5">
+              <p className="text-xs text-blue-700">
+                当前需求已按信息系统/软件类毕设约束生成（角色、模块、数据库、流程），更适合课程答辩与演示。
               </p>
             </div>
 

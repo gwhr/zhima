@@ -1,37 +1,11 @@
-import { db } from "@/lib/db";
-import { getRuntimeModel, type RuntimeModel } from "./runtime-model";
 import type { AiTaskType } from "@prisma/client";
+import { getRuntimeModel, type RuntimeModel } from "./runtime-model";
+import { getPlatformConfig } from "@/lib/system-config";
 
+type ModelStage = "configured" | "fallback";
 type QuotaStage = "normal" | "tightened" | "economy" | "exceeded";
 
-const modelMatrix: Record<QuotaStage, Partial<Record<AiTaskType, string>>> = {
-  normal: {
-    CODE_GEN: "deepseek",
-    THESIS: "glm",
-    CHART: "glm",
-    MODIFY_COMPLEX: "deepseek",
-  },
-  tightened: {
-    CODE_GEN: "glm",
-    THESIS: "glm",
-    CHART: "glm",
-    MODIFY_COMPLEX: "glm",
-  },
-  economy: {
-    CODE_GEN: "glm",
-    THESIS: "glm",
-    CHART: "glm",
-    MODIFY_COMPLEX: "glm",
-  },
-  exceeded: {
-    CODE_GEN: "glm",
-    THESIS: "glm",
-    CHART: "glm",
-    MODIFY_COMPLEX: "glm",
-  },
-};
-
-const defaultModel = "deepseek";
+const FALLBACK_MODEL_ID = "deepseek";
 
 export function getQuotaStage(used: number, budget: number): QuotaStage {
   if (budget <= 0) return "normal";
@@ -42,26 +16,39 @@ export function getQuotaStage(used: number, budget: number): QuotaStage {
   return "normal";
 }
 
+function pickModelIdByTask(
+  taskType: AiTaskType,
+  config: Awaited<ReturnType<typeof getPlatformConfig>>
+) {
+  if (taskType === "THESIS" || taskType === "CHART") {
+    return config.thesisGenModelId;
+  }
+  return config.codeGenModelId;
+}
+
 export async function selectModel(
-  userId: string,
-  workspaceId: string,
+  _userId: string,
+  _workspaceId: string,
   taskType: AiTaskType
-): Promise<{ model: RuntimeModel; modelId: string; stage: QuotaStage }> {
-  const quota = await db.userQuota.findUnique({
-    where: { userId_workspaceId: { userId, workspaceId } },
-  });
+): Promise<{ model: RuntimeModel; modelId: string; stage: ModelStage }> {
+  const config = await getPlatformConfig().catch(() => null);
+  const configuredModelId = config
+    ? pickModelIdByTask(taskType, config)
+    : FALLBACK_MODEL_ID;
 
-  const stage = quota
-    ? getQuotaStage(Number(quota.opusUsed), Number(quota.opusBudget))
-    : "normal";
-
-  const stageMatrix = modelMatrix[stage];
-  const modelId = stageMatrix[taskType] || defaultModel;
-  const model = await getRuntimeModel(modelId);
-
-  return {
-    model,
-    modelId,
-    stage,
-  };
+  try {
+    const model = await getRuntimeModel(configuredModelId);
+    return {
+      model,
+      modelId: configuredModelId,
+      stage: "configured",
+    };
+  } catch {
+    const fallbackModel = await getRuntimeModel(FALLBACK_MODEL_ID);
+    return {
+      model: fallbackModel,
+      modelId: FALLBACK_MODEL_ID,
+      stage: "fallback",
+    };
+  }
 }

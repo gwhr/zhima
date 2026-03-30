@@ -2,7 +2,7 @@ import { config } from "dotenv";
 config({ path: ".env.local" });
 config({ path: ".env" });
 import { Worker } from "bullmq";
-import { PrismaClient, type AiTaskType } from "@prisma/client";
+import { PrismaClient, type AiTaskType, type Prisma } from "@prisma/client";
 import { generateText } from "ai";
 import { parseCodeBlocks, type ParsedFile } from "../lib/parser/code-parser";
 import { buildDocx } from "../lib/thesis/docx-builder";
@@ -18,7 +18,10 @@ import sharp from "sharp";
 import * as path from "path";
 import { uploadFile, downloadFile } from "../lib/storage/oss";
 import { getRuntimeModel, type RuntimeModel } from "../lib/ai/runtime-model";
-import { getModelPricing } from "../lib/model-catalog-config";
+import {
+  releaseTokenReservation,
+  settleTokenReservation,
+} from "../lib/billing/token-wallet";
 
 function resolveRedisConnection() {
   const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
@@ -78,21 +81,28 @@ type UsageLike = {
   outputTokens?: number;
   promptTokens?: number;
   completionTokens?: number;
+  cacheHitTokens?: number;
+  cachedInputTokens?: number;
+  cacheReadInputTokens?: number;
 };
 
 interface TokenUsageSummary {
   inputTokens: number;
   outputTokens: number;
+  cacheHitTokens: number;
   totalTokens: number;
 }
 
 function normalizeUsage(usage: UsageLike | undefined): TokenUsageSummary {
   const inputTokens = usage?.inputTokens ?? usage?.promptTokens ?? 0;
   const outputTokens = usage?.outputTokens ?? usage?.completionTokens ?? 0;
+  const cacheHitTokens =
+    usage?.cacheHitTokens ?? usage?.cachedInputTokens ?? usage?.cacheReadInputTokens ?? 0;
   return {
     inputTokens,
     outputTokens,
-    totalTokens: inputTokens + outputTokens,
+    cacheHitTokens,
+    totalTokens: inputTokens + outputTokens + cacheHitTokens,
   };
 }
 
@@ -102,10 +112,12 @@ function addUsage(
 ): TokenUsageSummary {
   const inputTokens = total.inputTokens + next.inputTokens;
   const outputTokens = total.outputTokens + next.outputTokens;
+  const cacheHitTokens = total.cacheHitTokens + next.cacheHitTokens;
   return {
     inputTokens,
     outputTokens,
-    totalTokens: inputTokens + outputTokens,
+    cacheHitTokens,
+    totalTokens: inputTokens + outputTokens + cacheHitTokens,
   };
 }
 
@@ -128,32 +140,29 @@ function enforceSingleTaskTokenHardLimit(
   );
 }
 
-async function recordWorkerUsage(params: {
+async function settleWorkerUsage(params: {
+  reservationId: string;
   userId: string;
   workspaceId: string;
+  taskJobId: string;
   taskType: AiTaskType;
   modelId: string;
   usage: TokenUsageSummary;
   durationMs: number;
 }) {
-  if (params.usage.totalTokens <= 0) return;
-
-  const costs = await getModelPricing(params.modelId);
-  const costYuan =
-    (params.usage.inputTokens / 1_000_000) * costs.input +
-    (params.usage.outputTokens / 1_000_000) * costs.output;
-
-  await db.aiUsageLog.create({
-    data: {
-      userId: params.userId,
-      workspaceId: params.workspaceId,
-      taskType: params.taskType,
-      model: params.modelId,
+  return settleTokenReservation({
+    reservationId: params.reservationId,
+    userId: params.userId,
+    workspaceId: params.workspaceId,
+    taskType: params.taskType,
+    modelId: params.modelId,
+    usage: {
       inputTokens: params.usage.inputTokens,
       outputTokens: params.usage.outputTokens,
-      costYuan,
-      durationMs: params.durationMs,
+      cacheHitTokens: params.usage.cacheHitTokens,
     },
+    durationMs: params.durationMs,
+    description: `Settle worker usage for ${params.taskType}`,
   });
 }
 
@@ -162,28 +171,32 @@ async function updateJobProgress(
   progress: number,
   stage: string,
   detail: string,
-  modelOrExtras: string | Record<string, unknown> = DEFAULT_CODE_MODEL_ID,
+  modelOrExtras?: string | Record<string, unknown>,
   extras: Record<string, unknown> = {}
 ) {
   const modelId =
     typeof modelOrExtras === "string"
       ? modelOrExtras
-      : DEFAULT_CODE_MODEL_ID;
+      : undefined;
   const mergedExtras =
-    typeof modelOrExtras === "string" ? extras : modelOrExtras;
+    typeof modelOrExtras === "string" ? extras : modelOrExtras || {};
+
+  const resultPayload: Record<string, unknown> = {
+    stage,
+    detail,
+    updatedAt: new Date().toISOString(),
+    ...mergedExtras,
+  };
+  if (modelId) {
+    resultPayload.model = modelId;
+  }
 
   await db.taskJob.update({
     where: { id: jobId },
     data: {
       status: "RUNNING",
       progress,
-      result: {
-        stage,
-        detail,
-        model: modelId,
-        updatedAt: new Date().toISOString(),
-        ...mergedExtras,
-      },
+      result: resultPayload as Prisma.InputJsonValue,
     },
   });
 }
@@ -193,6 +206,20 @@ interface Requirements {
   roles?: { name: string; description: string }[];
   modules?: { name: string; features: string[]; enabled?: boolean }[];
   tables?: string[];
+}
+
+function requiresDualEnd(requirements: Requirements): boolean {
+  const roleText = (requirements.roles || [])
+    .map((role) => `${role.name} ${role.description}`)
+    .join(" ");
+  const moduleText = (requirements.modules || [])
+    .map((module) => `${module.name} ${(module.features || []).join(" ")}`)
+    .join(" ");
+  const fullText = `${roleText} ${moduleText}`.toLowerCase();
+
+  const hasAdmin = /管理员|管理端|后台|admin/.test(fullText);
+  const hasUser = /用户|客户端|前台|user/.test(fullText);
+  return hasAdmin && hasUser;
 }
 
 function sanitizeGeneratedPath(filePath: string): string {
@@ -315,6 +342,7 @@ function buildCodeGenPrompt(
 ): string {
   const techStack = (workspace.techStack as Record<string, string>) || {};
   const requirements = (workspace.requirements as Requirements) || {};
+  const dualEndRequired = requiresDualEnd(requirements);
   const modules = requirements.modules || [];
   const roles = requirements.roles || [];
   const tables = requirements.tables || [];
@@ -329,6 +357,9 @@ function buildCodeGenPrompt(
   const rolesText =
     roles.map((r) => `- ${r.name}: ${r.description}`).join("\n") || "- 管理员 / 普通用户";
   const tablesText = tables.map((t) => `- ${t}`).join("\n") || "- users";
+  const dualEndRule = dualEndRequired
+    ? "7. 本项目必须同时包含“用户端”和“后台管理端”两套页面（或路由）与对应后端接口。"
+    : "7. 如需求中包含管理员角色，请至少提供 1 个管理端页面与 1 个管理端接口。";
 
   return `你是资深全栈工程师。请为以下毕设项目生成“可运行”的最小完整代码骨架。
 
@@ -356,6 +387,7 @@ File: 相对路径
 4. 至少输出 10 个文件，且必须包含 \`README.md\`。
 5. 必须覆盖：后端入口、前端入口、至少 2 个业务页面、至少 2 个 API、1 个数据模型/SQL、1 个配置文件。
 6. 代码风格以教学可读性为主，可添加必要中文注释。
+${dualEndRule}
 
 建议目录结构（按技术栈灵活调整）：
 - backend/
@@ -363,11 +395,19 @@ File: 相对路径
 - docs/（可选）`;
 }
 
-const MIN_CODE_FILES = 6;
+const MIN_CODE_FILES = 12;
 const MAX_CODE_GEN_ATTEMPTS = 3;
 
-function buildCodeGenAttemptPrompt(basePrompt: string, attempt: number): string {
+function buildCodeGenAttemptPrompt(
+  basePrompt: string,
+  attempt: number,
+  dualEndRequired: boolean
+): string {
   if (attempt === 1) return basePrompt;
+
+  const dualEndRetryRule = dualEndRequired
+    ? "5. 必须出现用户端页面（如 frontend/src/views/user/**）和管理端页面（如 frontend/src/views/admin/**），并提供对应 API。"
+    : "";
 
   return `${basePrompt}
 
@@ -386,7 +426,8 @@ File: 相对路径
 - frontend 启动入口
 - frontend 至少 2 个页面
 - README.md
-4. 只输出代码文件，不要输出解释文字。`;
+4. 只输出代码文件，不要输出解释文字。
+${dualEndRetryRule}`;
 }
 
 async function generateCodeFilesWithRetry(
@@ -400,12 +441,19 @@ async function generateCodeFilesWithRetry(
   fallback: boolean;
   usage: TokenUsageSummary;
 }> {
+  const requirements = (workspace.requirements as Requirements) || {};
+  const dualEndRequired = requiresDualEnd(requirements);
   const basePrompt = buildCodeGenPrompt(workspace);
   let files: ParsedFile[] = [];
-  let usage: TokenUsageSummary = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+  let usage: TokenUsageSummary = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheHitTokens: 0,
+    totalTokens: 0,
+  };
 
   for (let attempt = 1; attempt <= MAX_CODE_GEN_ATTEMPTS; attempt++) {
-    const prompt = buildCodeGenAttemptPrompt(basePrompt, attempt);
+    const prompt = buildCodeGenAttemptPrompt(basePrompt, attempt, dualEndRequired);
     const result = await generateText({ model: selectedModel, prompt });
     usage = addUsage(usage, normalizeUsage(result.usage as UsageLike));
     enforceSingleTaskTokenHardLimit(
@@ -451,12 +499,18 @@ async function generateCodeFilesWithRetry(
     {
       path: "backend/sql/init.sql",
       language: "sql",
-      content: `-- ${workspace.topic} 初始化表（兜底）\nCREATE TABLE IF NOT EXISTS users (\n  id BIGINT PRIMARY KEY,\n  username VARCHAR(64) NOT NULL,\n  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n);\n`,
+      content: `-- ${workspace.topic} 初始化表（兜底）\nCREATE TABLE IF NOT EXISTS users (\n  id BIGINT PRIMARY KEY,\n  username VARCHAR(64) NOT NULL,\n  password VARCHAR(128) NOT NULL,\n  role VARCHAR(32) DEFAULT 'USER',\n  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n);\n\nCREATE TABLE IF NOT EXISTS products (\n  id BIGINT PRIMARY KEY,\n  name VARCHAR(128) NOT NULL,\n  price DECIMAL(10,2) NOT NULL,\n  status VARCHAR(32) DEFAULT 'ON_SHELF',\n  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n);\n\nCREATE TABLE IF NOT EXISTS orders (\n  id BIGINT PRIMARY KEY,\n  user_id BIGINT NOT NULL,\n  product_id BIGINT NOT NULL,\n  amount DECIMAL(10,2) NOT NULL,\n  status VARCHAR(32) DEFAULT 'CREATED',\n  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n);\n`,
     },
   ];
 
   if (backend.includes("java")) {
     fallbackFiles.push(
+      {
+        path: "backend/pom.xml",
+        language: "xml",
+        content:
+          "<project xmlns=\"http://maven.apache.org/POM/4.0.0\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:schemaLocation=\"http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd\">\n  <modelVersion>4.0.0</modelVersion>\n  <groupId>com.example</groupId>\n  <artifactId>demo</artifactId>\n  <version>0.0.1-SNAPSHOT</version>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.5</version>\n  </parent>\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-data-jpa</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.mysql</groupId>\n      <artifactId>mysql-connector-j</artifactId>\n      <scope>runtime</scope>\n    </dependency>\n  </dependencies>\n</project>\n",
+      },
       {
         path: "backend/src/main/java/com/example/Application.java",
         language: "java",
@@ -470,10 +524,40 @@ async function generateCodeFilesWithRetry(
           "package com.example.controller;\n\nimport org.springframework.web.bind.annotation.GetMapping;\nimport org.springframework.web.bind.annotation.RestController;\n\n@RestController\npublic class HealthController {\n  @GetMapping(\"/api/health\")\n  public String health() {\n    return \"ok\";\n  }\n}\n",
       },
       {
+        path: "backend/src/main/java/com/example/controller/UserController.java",
+        language: "java",
+        content:
+          "package com.example.controller;\n\nimport org.springframework.web.bind.annotation.GetMapping;\nimport org.springframework.web.bind.annotation.RequestMapping;\nimport org.springframework.web.bind.annotation.RestController;\n\nimport java.util.List;\nimport java.util.Map;\n\n@RestController\n@RequestMapping(\"/api/user\")\npublic class UserController {\n  @GetMapping(\"/products\")\n  public List<Map<String, Object>> products() {\n    return List.of(Map.of(\"id\", 1, \"name\", \"示例商品\", \"price\", 99.0));\n  }\n}\n",
+      },
+      {
+        path: "backend/src/main/java/com/example/controller/AdminController.java",
+        language: "java",
+        content:
+          "package com.example.controller;\n\nimport org.springframework.web.bind.annotation.GetMapping;\nimport org.springframework.web.bind.annotation.RequestMapping;\nimport org.springframework.web.bind.annotation.RestController;\n\nimport java.util.Map;\n\n@RestController\n@RequestMapping(\"/api/admin\")\npublic class AdminController {\n  @GetMapping(\"/dashboard\")\n  public Map<String, Object> dashboard() {\n    return Map.of(\"users\", 120, \"orders\", 35, \"sales\", 10240);\n  }\n}\n",
+      },
+      {
+        path: "backend/src/main/java/com/example/entity/User.java",
+        language: "java",
+        content:
+          "package com.example.entity;\n\nimport jakarta.persistence.Entity;\nimport jakarta.persistence.Id;\nimport jakarta.persistence.Table;\n\n@Entity\n@Table(name = \"users\")\npublic class User {\n  @Id\n  private Long id;\n  private String username;\n  private String password;\n  private String role;\n}\n",
+      },
+      {
+        path: "backend/src/main/java/com/example/entity/Product.java",
+        language: "java",
+        content:
+          "package com.example.entity;\n\nimport jakarta.persistence.Entity;\nimport jakarta.persistence.Id;\nimport jakarta.persistence.Table;\n\nimport java.math.BigDecimal;\n\n@Entity\n@Table(name = \"products\")\npublic class Product {\n  @Id\n  private Long id;\n  private String name;\n  private BigDecimal price;\n  private String status;\n}\n",
+      },
+      {
         path: "backend/src/main/resources/application.yml",
         language: "yaml",
         content:
           "server:\n  port: 8080\nspring:\n  datasource:\n    url: jdbc:mysql://localhost:3306/demo\n    username: root\n    password: root\n",
+      },
+      {
+        path: "backend/src/main/resources/application-dev.yml",
+        language: "yaml",
+        content:
+          "spring:\n  jpa:\n    hibernate:\n      ddl-auto: update\n    show-sql: true\n",
       }
     );
   } else {
@@ -488,12 +572,22 @@ async function generateCodeFilesWithRetry(
         path: "backend/src/main.js",
         language: "javascript",
         content:
-          "import http from \"node:http\";\n\nconst server = http.createServer((_req, res) => {\n  res.setHeader(\"content-type\", \"application/json\");\n  res.end(JSON.stringify({ ok: true }));\n});\n\nserver.listen(3001, () => {\n  console.log(\"backend running on :3001\");\n});\n",
+          "import http from \"node:http\";\nimport { userProducts } from \"./routes/user.js\";\nimport { adminDashboard } from \"./routes/admin.js\";\n\nconst server = http.createServer((req, res) => {\n  res.setHeader(\"content-type\", \"application/json\");\n  if (req.url === \"/api/user/products\") return res.end(JSON.stringify(userProducts()));\n  if (req.url === \"/api/admin/dashboard\") return res.end(JSON.stringify(adminDashboard()));\n  return res.end(JSON.stringify({ ok: true }));\n});\n\nserver.listen(3001, () => {\n  console.log(\"backend running on :3001\");\n});\n",
       },
       {
         path: "backend/src/routes/health.js",
         language: "javascript",
         content: "export const health = { status: \"ok\" };\n",
+      },
+      {
+        path: "backend/src/routes/user.js",
+        language: "javascript",
+        content: "export function userProducts() {\n  return [{ id: 1, name: \"示例商品\", price: 99 }];\n}\n",
+      },
+      {
+        path: "backend/src/routes/admin.js",
+        language: "javascript",
+        content: "export function adminDashboard() {\n  return { users: 100, orders: 20, sales: 8000 };\n}\n",
       }
     );
   }
@@ -507,16 +601,52 @@ async function generateCodeFilesWithRetry(
           '{\n  "name": "frontend",\n  "private": true,\n  "scripts": {\n    "dev": "vite"\n  }\n}\n',
       },
       {
+        path: "frontend/index.html",
+        language: "html",
+        content:
+          "<!doctype html>\n<html lang=\"zh-CN\">\n  <head><meta charset=\"UTF-8\" /><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" /><title>毕业设计助手示例项目</title></head>\n  <body><div id=\"app\"></div><script type=\"module\" src=\"/src/main.js\"></script></body>\n</html>\n",
+      },
+      {
         path: "frontend/src/main.js",
         language: "javascript",
         content:
-          "import { createApp } from \"vue\";\nimport App from \"./App.vue\";\n\ncreateApp(App).mount(\"#app\");\n",
+          "import { createApp } from \"vue\";\nimport App from \"./App.vue\";\nimport router from \"./router\";\n\ncreateApp(App).use(router).mount(\"#app\");\n",
+      },
+      {
+        path: "frontend/src/router/index.js",
+        language: "javascript",
+        content:
+          "import { createRouter, createWebHashHistory } from \"vue-router\";\nimport UserHomeView from \"../views/user/HomeView.vue\";\nimport UserProductView from \"../views/user/ProductListView.vue\";\nimport AdminDashboardView from \"../views/admin/DashboardView.vue\";\nimport AdminProductManageView from \"../views/admin/ProductManageView.vue\";\n\nconst routes = [\n  { path: \"/\", component: UserHomeView },\n  { path: \"/user/products\", component: UserProductView },\n  { path: \"/admin/dashboard\", component: AdminDashboardView },\n  { path: \"/admin/products\", component: AdminProductManageView },\n];\n\nexport default createRouter({ history: createWebHashHistory(), routes });\n",
       },
       {
         path: "frontend/src/App.vue",
         language: "vue",
         content:
-          "<template>\n  <main style=\"padding: 24px; font-family: Arial;\">\n    <h1>项目骨架已生成</h1>\n    <p>可基于此继续完善业务功能。</p>\n  </main>\n</template>\n",
+          "<template>\n  <main style=\"padding: 20px; font-family: Arial;\">\n    <h1>项目骨架已生成</h1>\n    <p>包含用户端与后台管理端示例路由。</p>\n    <nav style=\"display:flex; gap: 12px; margin-top: 12px;\">\n      <RouterLink to=\"/\">用户首页</RouterLink>\n      <RouterLink to=\"/user/products\">用户商品</RouterLink>\n      <RouterLink to=\"/admin/dashboard\">管理仪表盘</RouterLink>\n      <RouterLink to=\"/admin/products\">管理商品</RouterLink>\n    </nav>\n    <RouterView style=\"margin-top: 16px;\" />\n  </main>\n</template>\n",
+      },
+      {
+        path: "frontend/src/views/user/HomeView.vue",
+        language: "vue",
+        content:
+          "<template><section><h2>用户首页</h2><p>这里展示公告和推荐内容。</p></section></template>\n",
+      },
+      {
+        path: "frontend/src/views/user/ProductListView.vue",
+        language: "vue",
+        content:
+          "<template><section><h2>用户商品列表</h2><p>这里展示可浏览/购买商品。</p></section></template>\n",
+      },
+      {
+        path: "frontend/src/views/admin/DashboardView.vue",
+        language: "vue",
+        content:
+          "<template><section><h2>管理端仪表盘</h2><p>这里展示用户数、订单数和销售额。</p></section></template>\n",
+      },
+      {
+        path: "frontend/src/views/admin/ProductManageView.vue",
+        language: "vue",
+        content:
+          "<template><section><h2>管理端商品管理</h2><p>这里可进行商品上下架与编辑。</p></section></template>\n",
       }
     );
   } else {
@@ -528,6 +658,12 @@ async function generateCodeFilesWithRetry(
           '{\n  "name": "frontend",\n  "private": true,\n  "scripts": {\n    "dev": "vite"\n  }\n}\n',
       },
       {
+        path: "frontend/index.html",
+        language: "html",
+        content:
+          "<!doctype html>\n<html lang=\"zh-CN\">\n  <head><meta charset=\"UTF-8\" /><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" /><title>毕业设计助手示例项目</title></head>\n  <body><div id=\"root\"></div><script type=\"module\" src=\"/src/main.tsx\"></script></body>\n</html>\n",
+      },
+      {
         path: "frontend/src/main.tsx",
         language: "typescript",
         content:
@@ -537,7 +673,31 @@ async function generateCodeFilesWithRetry(
         path: "frontend/src/App.tsx",
         language: "typescript",
         content:
-          "export default function App() {\n  return (\n    <main style={{ padding: 24, fontFamily: \"Arial\" }}>\n      <h1>项目骨架已生成</h1>\n      <p>可基于此继续完善业务功能。</p>\n    </main>\n  );\n}\n",
+          "import { useState } from \"react\";\nimport { AdminDashboardPage } from \"./pages/admin/DashboardPage\";\nimport { AdminProductManagePage } from \"./pages/admin/ProductManagePage\";\nimport { UserHomePage } from \"./pages/user/HomePage\";\nimport { UserProductPage } from \"./pages/user/ProductPage\";\n\ntype View = \"userHome\" | \"userProducts\" | \"adminDashboard\" | \"adminProducts\";\n\nexport default function App() {\n  const [view, setView] = useState<View>(\"userHome\");\n  return (\n    <main style={{ padding: 24, fontFamily: \"Arial\" }}>\n      <h1>项目骨架已生成</h1>\n      <p>包含用户端与后台管理端示例页面。</p>\n      <div style={{ display: \"flex\", gap: 8, margin: \"12px 0\" }}>\n        <button onClick={() => setView(\"userHome\")}>用户首页</button>\n        <button onClick={() => setView(\"userProducts\")}>用户商品</button>\n        <button onClick={() => setView(\"adminDashboard\")}>管理仪表盘</button>\n        <button onClick={() => setView(\"adminProducts\")}>管理商品</button>\n      </div>\n      {view === \"userHome\" && <UserHomePage />}\n      {view === \"userProducts\" && <UserProductPage />}\n      {view === \"adminDashboard\" && <AdminDashboardPage />}\n      {view === \"adminProducts\" && <AdminProductManagePage />}\n    </main>\n  );\n}\n",
+      },
+      {
+        path: "frontend/src/pages/user/HomePage.tsx",
+        language: "typescript",
+        content:
+          "export function UserHomePage() {\n  return <section><h2>用户首页</h2><p>展示公告和推荐内容。</p></section>;\n}\n",
+      },
+      {
+        path: "frontend/src/pages/user/ProductPage.tsx",
+        language: "typescript",
+        content:
+          "export function UserProductPage() {\n  return <section><h2>用户商品页</h2><p>展示商品列表与购买入口。</p></section>;\n}\n",
+      },
+      {
+        path: "frontend/src/pages/admin/DashboardPage.tsx",
+        language: "typescript",
+        content:
+          "export function AdminDashboardPage() {\n  return <section><h2>管理端仪表盘</h2><p>展示核心运营指标。</p></section>;\n}\n",
+      },
+      {
+        path: "frontend/src/pages/admin/ProductManagePage.tsx",
+        language: "typescript",
+        content:
+          "export function AdminProductManagePage() {\n  return <section><h2>管理端商品管理</h2><p>支持上下架与编辑。</p></section>;\n}\n",
       }
     );
   }
@@ -616,7 +776,7 @@ const worker = new Worker(
   "zhima-tasks",
   async (job) => {
     console.log(`[Worker] Processing job ${job.id} type=${job.name}`);
-    const { jobId, workspaceId, userId } = job.data;
+    const { jobId, workspaceId, userId, reservationId } = job.data;
     const singleTaskTokenHardLimit = resolveSingleTaskTokenHardLimit(
       job.data.singleTaskTokenHardLimit
     );
@@ -629,14 +789,18 @@ const worker = new Worker(
 
       switch (job.name) {
         case "code-gen": {
+          if (!reservationId) {
+            throw new Error("Token reservation is required for code generation");
+          }
+          const codeModelId = resolveModelId(job.data.modelId, CODE_MODEL_ID);
           await updateJobProgress(
             jobId,
             20,
             "生成代码",
-            "正在分析需求并构建代码生成提示词"
+            "正在分析需求并构建代码生成提示词",
+            codeModelId
           );
 
-          const codeModelId = resolveModelId(job.data.modelId, CODE_MODEL_ID);
           const codeModel = await getRuntimeModel(codeModelId);
           const codeTaskType: AiTaskType = "CODE_GEN";
           const codeStartAt = Date.now();
@@ -654,6 +818,7 @@ const worker = new Worker(
             60,
             "保存代码文件",
             `AI 生成完成，开始保存 ${files.length} 个文件`,
+            codeModelId,
             { attempts, fallback }
           );
 
@@ -678,14 +843,17 @@ const worker = new Worker(
                 saveProgress,
                 "保存代码文件",
                 `已保存 ${i + 1}/${files.length} 个文件`,
+                codeModelId,
                 { attempts, fallback }
               );
             }
           }
 
-          await recordWorkerUsage({
+          const settlement = await settleWorkerUsage({
+            reservationId,
             userId,
             workspaceId,
+            taskJobId: jobId,
             taskType: codeTaskType,
             modelId: codeModelId,
             usage,
@@ -706,7 +874,12 @@ const worker = new Worker(
                 fallback,
                 inputTokens: usage.inputTokens,
                 outputTokens: usage.outputTokens,
+                cacheHitTokens: usage.cacheHitTokens,
                 totalTokens: usage.totalTokens,
+                billedPoints: settlement.billedPoints,
+                costYuan: settlement.costYuan,
+                billingMultiplier: settlement.multiplier,
+                pointRate: settlement.pointRate,
               },
             },
           });
@@ -725,6 +898,9 @@ const worker = new Worker(
         }
 
         case "thesis-gen": {
+          if (!reservationId) {
+            throw new Error("Token reservation is required for thesis generation");
+          }
           const thesisModelId = resolveModelId(job.data.modelId, THESIS_MODEL_ID);
           const thesisModel = await getRuntimeModel(thesisModelId);
           const thesisTaskType: AiTaskType = "THESIS";
@@ -732,6 +908,7 @@ const worker = new Worker(
           let thesisUsage: TokenUsageSummary = {
             inputTokens: 0,
             outputTokens: 0,
+            cacheHitTokens: 0,
             totalTokens: 0,
           };
           const techStack = workspace.techStack as Record<string, string>;
@@ -791,7 +968,8 @@ const worker = new Worker(
             jobId,
             15,
             "生成论文",
-            "正在生成图表资源（架构图 / ER 图 / 用例图）"
+            "正在生成图表资源（架构图 / ER 图 / 用例图）",
+            thesisModelId
           );
           console.log("[Worker] Generating diagrams for thesis...");
 
@@ -813,7 +991,8 @@ const worker = new Worker(
             jobId,
             25,
             "生成论文",
-            "图表资源已就绪，正在准备章节上下文"
+            "图表资源已就绪，正在准备章节上下文",
+            thesisModelId
           );
 
           // --- Step 2: Build context for AI ---
@@ -866,6 +1045,7 @@ ${tablesDesc || "未定义"}
               progress,
               "生成论文",
               `正在生成章节 ${i + 1}/${chapters.length}：${ch.title}`,
+              thesisModelId,
               { chapterIndex: i + 1, chapterTotal: chapters.length, chapterTitle: ch.title }
             );
 
@@ -936,7 +1116,8 @@ ${projectContext}
             jobId,
             90,
             "组装文档",
-            "正在组装 DOCX 并写入图表与表结构"
+            "正在组装 DOCX 并写入图表与表结构",
+            thesisModelId
           );
           console.log("[Worker] Building DOCX with diagrams and tables...");
 
@@ -1010,18 +1191,44 @@ ${projectContext}
                 templateName: activeTemplate?.name ?? null,
                 inputTokens: thesisUsage.inputTokens,
                 outputTokens: thesisUsage.outputTokens,
+                cacheHitTokens: thesisUsage.cacheHitTokens,
                 totalTokens: thesisUsage.totalTokens,
               },
             },
           });
 
-          await recordWorkerUsage({
+          const settlement = await settleWorkerUsage({
+            reservationId,
             userId,
             workspaceId,
+            taskJobId: jobId,
             taskType: thesisTaskType,
             modelId: thesisModelId,
             usage: thesisUsage,
             durationMs: Date.now() - thesisStartAt,
+          });
+
+          await db.taskJob.update({
+            where: { id: jobId },
+            data: {
+              result: {
+                stage: "璁烘枃鐢熸垚瀹屾垚",
+                detail: `绔犺妭 ${chapters.length + 2}锛屽浘琛?${diagramResult.svgs.length}锛岃〃缁撴瀯 ${tableSchemas.length}`,
+                model: thesisModelId,
+                chapters: chapters.length + 2,
+                diagrams: diagramResult.svgs.length,
+                tables: tableSchemas.length,
+                templateName: activeTemplate?.name ?? null,
+                inputTokens: thesisUsage.inputTokens,
+                outputTokens: thesisUsage.outputTokens,
+                cacheHitTokens: thesisUsage.cacheHitTokens,
+                totalTokens: thesisUsage.totalTokens,
+                billedPoints: settlement.billedPoints,
+                costYuan: settlement.costYuan,
+                billingMultiplier: settlement.multiplier,
+                pointRate: settlement.pointRate,
+              },
+            },
           });
 
           await db.notification.create({
@@ -1108,23 +1315,40 @@ ${projectContext}
           : 1;
       const currentAttempt = job.attemptsMade + 1;
       const willRetry = currentAttempt < totalAttempts;
+      const noRetryError =
+        message.includes("Insufficient token balance") ||
+        message.includes("daily spend limit") ||
+        message.includes("Token reservation");
+      const finalWillRetry = noRetryError ? false : willRetry;
       await db.taskJob.update({
         where: { id: jobId },
         data: {
-          status: willRetry ? "PENDING" : "FAILED",
+          status: finalWillRetry ? "PENDING" : "FAILED",
           error: message,
           result: {
             stage: "任务失败",
-            detail: willRetry
+            detail: finalWillRetry
               ? `${message}（准备重试 ${currentAttempt}/${totalAttempts}）`
               : message,
             model: resolveModelId(job.data.modelId, CODE_MODEL_ID),
             attemptsMade: currentAttempt,
             attemptsTotal: totalAttempts,
-            retrying: willRetry,
+            retrying: finalWillRetry,
           },
         },
       });
+
+      if (!finalWillRetry && reservationId) {
+        await releaseTokenReservation({
+          reservationId,
+          reason: `Job failed: ${message}`,
+        }).catch((releaseError) => {
+          console.error(
+            `[Worker] Failed to release reservation ${reservationId}:`,
+            releaseError
+          );
+        });
+      }
       throw err;
     }
   },

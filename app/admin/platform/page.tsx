@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2 } from "lucide-react";
 
 interface PlatformConfig {
   codeGenModelId: string;
@@ -13,6 +13,10 @@ interface PlatformConfig {
   defaultUserTokenBudget: number;
   codeGenTokenReserve: number;
   thesisGenTokenReserve: number;
+  chatTokenReserve: number;
+  tokenBillingMultiplier: number;
+  tokenPointsPerYuan: number;
+  dailyUserPointLimit: number;
   defaultUserTaskConcurrencyLimit: number;
   taskFailureRetryLimit: number;
   singleTaskTokenHardLimit: number;
@@ -37,6 +41,8 @@ export default function AdminPlatformPage() {
     if (result.success) {
       setConfig(result.data.config);
       setModelOptions(result.data.modelOptions);
+    } else {
+      setMessage(result.error || "加载平台配置失败");
     }
     setLoading(false);
   }
@@ -59,9 +65,8 @@ export default function AdminPlatformPage() {
       if (!result.success) {
         throw new Error(result.error || "保存失败");
       }
-
       setConfig(result.data.config);
-      setMessage("平台配置已保存。");
+      setMessage("平台配置已保存");
     } catch (saveError) {
       setMessage(saveError instanceof Error ? saveError.message : "保存失败");
     } finally {
@@ -69,22 +74,27 @@ export default function AdminPlatformPage() {
     }
   }
 
+  const estimatedPointFormula = useMemo(() => {
+    if (!config) return "";
+    return `平台点数 = 模型成本(元) × ${config.tokenBillingMultiplier} × ${config.tokenPointsPerYuan}`;
+  }, [config]);
+
   if (loading || !config) {
     return (
-      <div className="p-6 flex items-center gap-2 text-muted-foreground">
+      <div className="flex items-center gap-2 p-6 text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" />
-        加载配置中...
+        正在加载配置...
       </div>
     );
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6 p-6">
       <h1 className="text-2xl font-bold">平台配置</h1>
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">模型与额度</CardTitle>
+          <CardTitle className="text-base">模型与默认额度</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid gap-3 md:grid-cols-2">
@@ -137,9 +147,9 @@ export default function AdminPlatformPage() {
             </label>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-4">
             <label className="space-y-1 text-sm">
-              <span className="text-muted-foreground">默认用户 Token 总额度</span>
+              <span className="text-muted-foreground">用户默认总额度</span>
               <Input
                 type="number"
                 min={1}
@@ -158,7 +168,7 @@ export default function AdminPlatformPage() {
             </label>
 
             <label className="space-y-1 text-sm">
-              <span className="text-muted-foreground">代码生成预留 Token</span>
+              <span className="text-muted-foreground">代码任务冻结点数</span>
               <Input
                 type="number"
                 min={1}
@@ -177,7 +187,7 @@ export default function AdminPlatformPage() {
             </label>
 
             <label className="space-y-1 text-sm">
-              <span className="text-muted-foreground">论文生成预留 Token</span>
+              <span className="text-muted-foreground">论文任务冻结点数</span>
               <Input
                 type="number"
                 min={1}
@@ -194,6 +204,95 @@ export default function AdminPlatformPage() {
                 }
               />
             </label>
+
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">AI 对话冻结点数</span>
+              <Input
+                type="number"
+                min={1}
+                value={config.chatTokenReserve}
+                onChange={(event) =>
+                  setConfig((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          chatTokenReserve: Number(event.target.value || 0),
+                        }
+                      : prev
+                  )
+                }
+              />
+            </label>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Token 计费规则</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-3 md:grid-cols-3">
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">计费倍率</span>
+              <Input
+                type="number"
+                min={0.1}
+                step="0.1"
+                value={config.tokenBillingMultiplier}
+                onChange={(event) =>
+                  setConfig((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          tokenBillingMultiplier: Number(event.target.value || 0),
+                        }
+                      : prev
+                  )
+                }
+              />
+            </label>
+
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">点数汇率（点/元）</span>
+              <Input
+                type="number"
+                min={1}
+                value={config.tokenPointsPerYuan}
+                onChange={(event) =>
+                  setConfig((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          tokenPointsPerYuan: Number(event.target.value || 0),
+                        }
+                      : prev
+                  )
+                }
+              />
+            </label>
+
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">单用户日扣点上限</span>
+              <Input
+                type="number"
+                min={1}
+                value={config.dailyUserPointLimit}
+                onChange={(event) =>
+                  setConfig((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          dailyUserPointLimit: Number(event.target.value || 0),
+                        }
+                      : prev
+                  )
+                }
+              />
+            </label>
+          </div>
+          <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
+            {estimatedPointFormula}
           </div>
         </CardContent>
       </Card>
@@ -205,9 +304,7 @@ export default function AdminPlatformPage() {
         <CardContent className="space-y-3">
           <div className="grid gap-3 md:grid-cols-3">
             <label className="space-y-1 text-sm">
-              <span className="text-muted-foreground">
-                默认单用户并发任务上限
-              </span>
+              <span className="text-muted-foreground">默认并发上限</span>
               <Input
                 type="number"
                 min={1}
@@ -228,7 +325,7 @@ export default function AdminPlatformPage() {
             </label>
 
             <label className="space-y-1 text-sm">
-              <span className="text-muted-foreground">同类任务失败重试次数</span>
+              <span className="text-muted-foreground">任务失败最大重试次数</span>
               <Input
                 type="number"
                 min={0}
@@ -247,7 +344,7 @@ export default function AdminPlatformPage() {
             </label>
 
             <label className="space-y-1 text-sm">
-              <span className="text-muted-foreground">单次任务 Token 硬上限</span>
+              <span className="text-muted-foreground">单任务 Token 硬上限</span>
               <Input
                 type="number"
                 min={1}
@@ -267,10 +364,6 @@ export default function AdminPlatformPage() {
               />
             </label>
           </div>
-          <p className="text-xs text-muted-foreground">
-            用户可在“用户管理”中单独覆盖并发上限；重试次数和单次任务 Token
-            上限为全平台统一策略。
-          </p>
         </CardContent>
       </Card>
 
@@ -286,10 +379,7 @@ export default function AdminPlatformPage() {
               onChange={(event) =>
                 setConfig((prev) =>
                   prev
-                    ? {
-                        ...prev,
-                        enableCodeGeneration: event.target.checked,
-                      }
+                    ? { ...prev, enableCodeGeneration: event.target.checked }
                     : prev
                 )
               }
@@ -304,10 +394,7 @@ export default function AdminPlatformPage() {
               onChange={(event) =>
                 setConfig((prev) =>
                   prev
-                    ? {
-                        ...prev,
-                        enableThesisGeneration: event.target.checked,
-                      }
+                    ? { ...prev, enableThesisGeneration: event.target.checked }
                     : prev
                 )
               }
@@ -322,10 +409,7 @@ export default function AdminPlatformPage() {
               onChange={(event) =>
                 setConfig((prev) =>
                   prev
-                    ? {
-                        ...prev,
-                        enablePreviewBuild: event.target.checked,
-                      }
+                    ? { ...prev, enablePreviewBuild: event.target.checked }
                     : prev
                 )
               }

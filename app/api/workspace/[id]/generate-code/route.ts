@@ -3,12 +3,12 @@ import { success, error } from "@/lib/api-response";
 import { requireAuth } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { taskQueue } from "@/lib/queue";
-import { ensureUserTokenQuota } from "@/lib/ai/usage";
 import {
   ensureUserTaskConcurrencyAllowed,
   getQueueAttemptsFromRetryLimit,
 } from "@/lib/risk-control";
 import { getPlatformConfig } from "@/lib/system-config";
+import { freezeTokenReservation } from "@/lib/billing/token-wallet";
 
 type WorkspaceRequirements = {
   featureConfirmed?: boolean;
@@ -61,6 +61,17 @@ export async function POST(
     return error("代码正在生成中，请勿重复提交。", 409);
   }
 
+  const existingCodeFile = await db.workspaceFile.findFirst({
+    where: {
+      workspaceId: id,
+      type: "CODE",
+    },
+    select: { id: true },
+  });
+  if (existingCodeFile) {
+    return error("当前工作空间代码已生成。请在 AI 对话中继续修改。", 409);
+  }
+
   try {
     await ensureUserTaskConcurrencyAllowed(
       userId,
@@ -75,19 +86,6 @@ export async function POST(
     );
   }
 
-  try {
-    await ensureUserTokenQuota(
-      userId,
-      platformConfig?.codeGenTokenReserve ?? 120_000,
-      "代码生成"
-    );
-  } catch (quotaError) {
-    return error(
-      quotaError instanceof Error ? quotaError.message : "Token 额度不足",
-      402
-    );
-  }
-
   await db.workspace.update({
     where: { id },
     data: {
@@ -99,13 +97,48 @@ export async function POST(
     },
   });
 
-  const job = await db.taskJob.create({
-    data: {
-      workspaceId: id,
-      type: "CODE_GEN",
-      status: "PENDING",
-    },
-  });
+  const reservePoints = platformConfig?.codeGenTokenReserve ?? 120_000;
+  let jobId = "";
+  let reservationId = "";
+
+  try {
+    const txResult = await db.$transaction(async (tx) => {
+      const job = await tx.taskJob.create({
+        data: {
+          workspaceId: id,
+          type: "CODE_GEN",
+          status: "PENDING",
+        },
+      });
+
+      const reservation = await freezeTokenReservation(
+        {
+          userId,
+          workspaceId: id,
+          taskJobId: job.id,
+          source: "CODE_GEN",
+          reservePoints,
+          description: "Freeze points for code generation",
+        },
+        tx
+      );
+
+      return {
+        jobId: job.id,
+        reservationId: reservation.reservationId,
+      };
+    });
+
+    jobId = txResult.jobId;
+    reservationId = txResult.reservationId;
+  } catch (quotaError) {
+    return error(
+      quotaError instanceof Error
+        ? quotaError.message
+        : "Token 余额不足，无法启动代码生成",
+      402
+    );
+  }
 
   const attempts = getQueueAttemptsFromRetryLimit(
     platformConfig?.taskFailureRetryLimit ?? 2
@@ -114,11 +147,12 @@ export async function POST(
   await taskQueue.add(
     "code-gen",
     {
-      jobId: job.id,
+      jobId,
       workspaceId: id,
       userId,
       modelId: platformConfig?.codeGenModelId,
       singleTaskTokenHardLimit: platformConfig?.singleTaskTokenHardLimit,
+      reservationId,
     },
     {
       attempts,
@@ -128,12 +162,15 @@ export async function POST(
 
   return success(
     {
-      jobId: job.id,
+      jobId,
       message: "代码生成任务已提交",
       riskControl: {
         retryLimit: Math.max(0, attempts - 1),
         singleTaskTokenHardLimit:
           platformConfig?.singleTaskTokenHardLimit ?? 240_000,
+      },
+      billing: {
+        reservedPoints: reservePoints,
       },
     },
     202

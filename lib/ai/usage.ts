@@ -2,6 +2,11 @@ import { db } from "@/lib/db";
 import type { AiTaskType } from "@prisma/client";
 import { getPlatformConfig } from "@/lib/system-config";
 import { getModelPricing } from "@/lib/model-catalog-config";
+import {
+  ensureWalletCanReserve,
+  getUserWalletSummary,
+  settleTokenReservation,
+} from "@/lib/billing/token-wallet";
 
 interface UsageParams {
   userId: string;
@@ -10,7 +15,9 @@ interface UsageParams {
   modelId: string;
   inputTokens: number;
   outputTokens: number;
+  cacheHitTokens?: number;
   durationMs: number;
+  reservationId?: string;
 }
 
 const FALLBACK_USER_TOKEN_BUDGET = 500_000;
@@ -56,78 +63,73 @@ export async function getEffectiveUserTokenBudget(userId: string): Promise<numbe
 }
 
 export async function recordUsage(params: UsageParams) {
-  const costs = await getModelPricing(params.modelId);
-  const costYuan =
-    (params.inputTokens / 1_000_000) * costs.input +
-    (params.outputTokens / 1_000_000) * costs.output;
+  if (!params.reservationId) {
+    const pricing = await getModelPricing(params.modelId);
+    const costYuan =
+      (params.inputTokens / 1_000_000) * pricing.input +
+      (params.outputTokens / 1_000_000) * pricing.output +
+      ((params.cacheHitTokens ?? 0) / 1_000_000) * pricing.cache;
 
-  await db.$transaction([
-    db.aiUsageLog.create({
+    await db.aiUsageLog.create({
       data: {
         userId: params.userId,
         workspaceId: params.workspaceId,
         taskType: params.taskType,
         model: params.modelId,
-        inputTokens: params.inputTokens,
-        outputTokens: params.outputTokens,
+        inputTokens: Math.max(0, Math.floor(params.inputTokens)),
+        outputTokens: Math.max(0, Math.floor(params.outputTokens)),
+        cacheHitTokens: Math.max(0, Math.floor(params.cacheHitTokens ?? 0)),
         costYuan,
-        durationMs: params.durationMs,
+        billedPoints: 0,
+        pointRate: 0,
+        billingMultiplier: 0,
+        durationMs: Math.max(0, Math.floor(params.durationMs)),
       },
-    }),
-    ...(params.modelId === "opus"
-      ? [
-          db.userQuota.update({
-            where: {
-              userId_workspaceId: {
-                userId: params.userId,
-                workspaceId: params.workspaceId,
-              },
-            },
-            data: { opusUsed: { increment: costYuan } },
-          }),
-        ]
-      : []),
-  ]);
+    });
+    return {
+      costYuan,
+      billedPoints: 0,
+    };
+  }
 
-  return costYuan;
+  const settlement = await settleTokenReservation({
+    reservationId: params.reservationId,
+    userId: params.userId,
+    workspaceId: params.workspaceId,
+    taskType: params.taskType,
+    modelId: params.modelId,
+    usage: {
+      inputTokens: params.inputTokens,
+      outputTokens: params.outputTokens,
+      cacheHitTokens: params.cacheHitTokens ?? 0,
+    },
+    durationMs: params.durationMs,
+    description: `Settle usage for ${params.taskType}`,
+  });
+
+  return {
+    costYuan: settlement.costYuan,
+    billedPoints: settlement.billedPoints,
+  };
 }
 
 export async function getUserTokenSummary(userId: string) {
-  const tokenBudget = await getEffectiveUserTokenBudget(userId);
-
-  const aggregated = await db.aiUsageLog.aggregate({
-    where: { userId },
-    _sum: {
-      inputTokens: true,
-      outputTokens: true,
-    },
-  });
-
-  const inputTokens = aggregated._sum.inputTokens ?? 0;
-  const outputTokens = aggregated._sum.outputTokens ?? 0;
-  const tokenUsed = inputTokens + outputTokens;
-
-  return {
-    tokenBudget,
-    tokenUsed,
-    tokenRemaining: Math.max(0, tokenBudget - tokenUsed),
-    inputTokens,
-    outputTokens,
-  };
+  return getUserWalletSummary(userId);
 }
 
 export async function ensureUserTokenQuota(
   userId: string,
-  reserveTokens: number,
-  taskLabel = "当前操作"
+  reservePoints: number,
+  taskLabel = "Current task"
 ) {
-  const summary = await getUserTokenSummary(userId);
-  if (summary.tokenRemaining < reserveTokens) {
-    throw new Error(
-      `${taskLabel}所需 Token 不足。当前剩余 ${summary.tokenRemaining}，至少需要 ${reserveTokens}。`
-    );
-  }
-  return summary;
+  const wallet = await ensureWalletCanReserve(userId, reservePoints, taskLabel);
+  return {
+    tokenBudget: wallet.totalPoints,
+    tokenUsed: wallet.usedPoints,
+    tokenRemaining: wallet.availablePoints,
+    tokenFrozen: wallet.frozenPoints,
+    dailyUsedPoints: wallet.dailyUsedPoints,
+  };
 }
 
 export async function getQuotaStatus(userId: string, workspaceId: string) {

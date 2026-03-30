@@ -9,6 +9,10 @@ export interface PlatformConfig {
   defaultUserTokenBudget: number;
   codeGenTokenReserve: number;
   thesisGenTokenReserve: number;
+  chatTokenReserve: number;
+  tokenBillingMultiplier: number;
+  tokenPointsPerYuan: number;
+  dailyUserPointLimit: number;
   defaultUserTaskConcurrencyLimit: number;
   taskFailureRetryLimit: number;
   singleTaskTokenHardLimit: number;
@@ -34,6 +38,11 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   return value === "1" || value.toLowerCase() === "true";
 }
 
+function parsePositiveNumber(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseFloat(value ?? "");
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 export function getDefaultPlatformConfigFromEnv(): PlatformConfig {
   return {
     codeGenModelId: process.env.CODE_GEN_MODEL_ID || "deepseek",
@@ -49,6 +58,19 @@ export function getDefaultPlatformConfigFromEnv(): PlatformConfig {
     thesisGenTokenReserve: parsePositiveInt(
       process.env.THESIS_GEN_TOKEN_RESERVE,
       220_000
+    ),
+    chatTokenReserve: parsePositiveInt(process.env.CHAT_TOKEN_RESERVE, 8_000),
+    tokenBillingMultiplier: parsePositiveNumber(
+      process.env.TOKEN_BILLING_MULTIPLIER,
+      3
+    ),
+    tokenPointsPerYuan: parsePositiveInt(
+      process.env.TOKEN_POINTS_PER_YUAN,
+      1000
+    ),
+    dailyUserPointLimit: parsePositiveInt(
+      process.env.DAILY_USER_POINT_LIMIT,
+      500_000
     ),
     defaultUserTaskConcurrencyLimit: parsePositiveInt(
       process.env.DEFAULT_USER_TASK_CONCURRENCY_LIMIT,
@@ -96,6 +118,25 @@ function normalizeConfig(
     thesisGenTokenReserve: Math.max(
       1,
       Number(input.thesisGenTokenReserve ?? defaults.thesisGenTokenReserve)
+    ),
+    chatTokenReserve: Math.max(
+      1,
+      Number(input.chatTokenReserve ?? defaults.chatTokenReserve)
+    ),
+    tokenBillingMultiplier: Math.max(
+      0.1,
+      Math.min(
+        10,
+        Number(input.tokenBillingMultiplier ?? defaults.tokenBillingMultiplier)
+      )
+    ),
+    tokenPointsPerYuan: Math.max(
+      1,
+      Number(input.tokenPointsPerYuan ?? defaults.tokenPointsPerYuan)
+    ),
+    dailyUserPointLimit: Math.max(
+      1,
+      Number(input.dailyUserPointLimit ?? defaults.dailyUserPointLimit)
     ),
     defaultUserTaskConcurrencyLimit: Math.max(
       1,

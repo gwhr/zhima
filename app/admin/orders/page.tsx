@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 interface OrderItem {
   id: string;
@@ -32,25 +32,25 @@ export default function AdminOrdersPage() {
 
   useEffect(() => {
     fetch("/api/admin/orders")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.success) setOrders(data.data);
+      .then((response) => response.json())
+      .then((result) => {
+        if (result.success) setOrders(result.data);
       })
       .finally(() => setLoading(false));
   }, []);
 
   if (loading) {
     return (
-      <div className="p-6 flex items-center gap-2 text-muted-foreground">
+      <div className="flex items-center gap-2 p-6 text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" />
-        加载订单中...
+        正在加载订单...
       </div>
     );
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-bold">订单管理</h1>
+    <div className="space-y-6 p-6">
+      <h1 className="text-2xl font-bold">充值订单</h1>
 
       <Card>
         <CardHeader className="pb-3">
@@ -61,41 +61,40 @@ export default function AdminOrdersPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-muted-foreground">
-                  <th className="text-left py-3 px-2 font-medium">订单号</th>
-                  <th className="text-left py-3 px-2 font-medium">用户</th>
-                  <th className="text-left py-3 px-2 font-medium">套餐</th>
-                  <th className="text-left py-3 px-2 font-medium">金额</th>
-                  <th className="text-left py-3 px-2 font-medium">状态</th>
-                  <th className="text-left py-3 px-2 font-medium">创建时间</th>
-                  <th className="text-left py-3 px-2 font-medium">支付时间</th>
+                  <th className="px-2 py-3 text-left font-medium">订单号</th>
+                  <th className="px-2 py-3 text-left font-medium">用户</th>
+                  <th className="px-2 py-3 text-left font-medium">充值包</th>
+                  <th className="px-2 py-3 text-left font-medium">金额</th>
+                  <th className="px-2 py-3 text-left font-medium">状态</th>
+                  <th className="px-2 py-3 text-left font-medium">支付流水号</th>
+                  <th className="px-2 py-3 text-left font-medium">创建时间</th>
+                  <th className="px-2 py-3 text-left font-medium">支付时间</th>
                 </tr>
               </thead>
               <tbody>
                 {orders.map((order) => {
-                  const st = statusLabels[order.status] || statusLabels.PENDING;
+                  const status = statusLabels[order.status] || statusLabels.PENDING;
                   return (
-                    <tr
-                      key={order.id}
-                      className="border-b last:border-0 hover:bg-muted/50"
-                    >
-                      <td className="py-3 px-2 font-mono text-xs">{order.id}</td>
-                      <td className="py-3 px-2">
+                    <tr key={order.id} className="border-b last:border-0 hover:bg-muted/50">
+                      <td className="px-2 py-3 font-mono text-xs">{order.id}</td>
+                      <td className="px-2 py-3">
                         {order.user.name || order.user.email || "-"}
                       </td>
-                      <td className="py-3 px-2">{order.planType}</td>
-                      <td className="py-3 px-2 font-medium">
-                        ¥ {Number(order.amount).toFixed(2)}
+                      <td className="px-2 py-3">{order.planType}</td>
+                      <td className="px-2 py-3 font-medium">
+                        ¥ {(Number(order.amount) / 100).toFixed(2)}
                       </td>
-                      <td className="py-3 px-2">
-                        <Badge variant={st.variant}>{st.label}</Badge>
+                      <td className="px-2 py-3">
+                        <Badge variant={status.variant}>{status.label}</Badge>
                       </td>
-                      <td className="py-3 px-2 text-muted-foreground">
+                      <td className="px-2 py-3 font-mono text-xs text-muted-foreground">
+                        {order.tradeNo || "-"}
+                      </td>
+                      <td className="px-2 py-3 text-muted-foreground">
                         {new Date(order.createdAt).toLocaleString("zh-CN")}
                       </td>
-                      <td className="py-3 px-2 text-muted-foreground">
-                        {order.paidAt
-                          ? new Date(order.paidAt).toLocaleString("zh-CN")
-                          : "-"}
+                      <td className="px-2 py-3 text-muted-foreground">
+                        {order.paidAt ? new Date(order.paidAt).toLocaleString("zh-CN") : "-"}
                       </td>
                     </tr>
                   );

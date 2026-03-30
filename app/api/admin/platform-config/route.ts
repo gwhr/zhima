@@ -34,6 +34,9 @@ export async function PATCH(req: Request) {
     "defaultUserTokenBudget",
     "codeGenTokenReserve",
     "thesisGenTokenReserve",
+    "chatTokenReserve",
+    "tokenPointsPerYuan",
+    "dailyUserPointLimit",
     "defaultUserTaskConcurrencyLimit",
     "singleTaskTokenHardLimit",
   ] as const;
@@ -53,6 +56,14 @@ export async function PATCH(req: Request) {
       return error("taskFailureRetryLimit 必须为非负数", 400);
     }
     patch.taskFailureRetryLimit = Math.floor(value);
+  }
+
+  if ("tokenBillingMultiplier" in body) {
+    const value = Number(body.tokenBillingMultiplier);
+    if (!Number.isFinite(value) || value <= 0) {
+      return error("tokenBillingMultiplier 必须为正数", 400);
+    }
+    patch.tokenBillingMultiplier = Number(value.toFixed(4));
   }
 
   const booleanKeys = [

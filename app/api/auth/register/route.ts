@@ -5,12 +5,38 @@ import { ensureBuiltinAdminUser } from "@/lib/bootstrap/admin-user";
 import { checkCode } from "@/lib/sms/provider";
 import { generateNickname } from "@/lib/utils/name-generator";
 
+const REFERRAL_REWARD_YUAN = Number(process.env.REFERRAL_REWARD_YUAN ?? 0);
+
+function normalizeInviteCode(inviteCode?: unknown) {
+  if (typeof inviteCode !== "string") return "";
+  return inviteCode.trim().toUpperCase();
+}
+
 export async function POST(req: Request) {
   try {
-    await ensureBuiltinAdminUser();
+    try {
+      await ensureBuiltinAdminUser();
+    } catch {
+      // Do not block user registration when bootstrap admin initialization fails.
+    }
 
     const body = await req.json();
-    const { email, password, name, phone, code } = body;
+    const { email, password, name, phone, code, inviteCode } = body;
+    const normalizedInviteCode = normalizeInviteCode(inviteCode);
+
+    let inviterCode = null;
+    if (normalizedInviteCode) {
+      inviterCode = await db.inviteCode.findUnique({
+        where: { code: normalizedInviteCode },
+      });
+
+      if (!inviterCode) {
+        return NextResponse.json(
+          { success: false, error: "邀请码不存在或已失效" },
+          { status: 400 }
+        );
+      }
+    }
 
     if (phone) {
       if (!code) {
@@ -39,17 +65,37 @@ export async function POST(req: Request) {
       const randomPassword = Math.random().toString(36).slice(-10);
       const hashedPassword = await bcrypt.hash(randomPassword, 10);
 
-      const user = await db.user.create({
-        data: {
-          phone,
-          name: name || generateNickname(),
-          password: hashedPassword,
-        },
-      });
+      const user = inviterCode
+        ? await db.$transaction(async (tx) => {
+            const createdUser = await tx.user.create({
+              data: {
+                phone,
+                name: name || generateNickname(),
+                password: hashedPassword,
+              },
+            });
+
+            await tx.inviteCode.update({
+              where: { id: inviterCode.id },
+              data: {
+                usedCount: { increment: 1 },
+                rewardTotal: { increment: REFERRAL_REWARD_YUAN },
+              },
+            });
+
+            return createdUser;
+          })
+        : await db.user.create({
+            data: {
+              phone,
+              name: name || generateNickname(),
+              password: hashedPassword,
+            },
+          });
 
       return NextResponse.json({
         success: true,
-        data: { id: user.id, phone: user.phone, name: user.name },
+        data: { id: user.id, phone: user.phone, name: user.name, inviteApplied: !!inviterCode },
       }, { status: 201 });
     }
 
@@ -76,17 +122,37 @@ export async function POST(req: Request) {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const user = await db.user.create({
-      data: {
-        email,
-        password: hashedPassword,
-        name: name || generateNickname(),
-      },
-    });
+    const user = inviterCode
+      ? await db.$transaction(async (tx) => {
+          const createdUser = await tx.user.create({
+            data: {
+              email,
+              password: hashedPassword,
+              name: name || generateNickname(),
+            },
+          });
+
+          await tx.inviteCode.update({
+            where: { id: inviterCode.id },
+            data: {
+              usedCount: { increment: 1 },
+              rewardTotal: { increment: REFERRAL_REWARD_YUAN },
+            },
+          });
+
+          return createdUser;
+        })
+      : await db.user.create({
+          data: {
+            email,
+            password: hashedPassword,
+            name: name || generateNickname(),
+          },
+        });
 
     return NextResponse.json({
       success: true,
-      data: { id: user.id, email: user.email, name: user.name },
+      data: { id: user.id, email: user.email, name: user.name, inviteApplied: !!inviterCode },
     }, { status: 201 });
   } catch {
     return NextResponse.json(

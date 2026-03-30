@@ -21,6 +21,7 @@ type StoredCustomOpenAIModel = {
   apiKeyEnc: string;
   inputCostPerMToken: number;
   outputCostPerMToken: number;
+  cacheHitCostPerMToken: number;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -41,6 +42,7 @@ export type RuntimeModelDefinition = {
   apiKey: string;
   inputCostPerMToken: number;
   outputCostPerMToken: number;
+  cacheHitCostPerMToken: number;
 };
 
 export type ModelOption = {
@@ -57,6 +59,7 @@ export type CustomOpenAIModelPatch = {
   apiKey?: string;
   inputCostPerMToken?: number;
   outputCostPerMToken?: number;
+  cacheHitCostPerMToken?: number;
   enabled?: boolean;
 };
 
@@ -67,6 +70,7 @@ export type CustomOpenAIModelAdminView = {
   baseUrl: string;
   inputCostPerMToken: number;
   outputCostPerMToken: number;
+  cacheHitCostPerMToken: number;
   enabled: boolean;
   apiKeyMasked: string;
   apiKeySource: "admin" | "none";
@@ -119,6 +123,10 @@ function normalizeStoredCustomModel(raw: unknown): StoredCustomOpenAIModel | nul
     inputCostPerMToken: normalizeNonNegativeNumber(value.inputCostPerMToken, 0),
     outputCostPerMToken: normalizeNonNegativeNumber(
       value.outputCostPerMToken,
+      0
+    ),
+    cacheHitCostPerMToken: normalizeNonNegativeNumber(
+      value.cacheHitCostPerMToken,
       0
     ),
     enabled: value.enabled !== false,
@@ -206,6 +214,7 @@ export async function getCustomOpenAIModelAdminView(): Promise<
       baseUrl: item.baseUrl,
       inputCostPerMToken: item.inputCostPerMToken,
       outputCostPerMToken: item.outputCostPerMToken,
+      cacheHitCostPerMToken: item.cacheHitCostPerMToken,
       enabled: item.enabled,
       apiKeyMasked: maskSecret(plain),
       apiKeySource: plain ? "admin" : "none",
@@ -235,6 +244,10 @@ export async function saveCustomOpenAIModels(
     );
     const outputCostPerMToken = normalizeNonNegativeNumber(
       rawItem.outputCostPerMToken,
+      0
+    );
+    const cacheHitCostPerMToken = normalizeNonNegativeNumber(
+      rawItem.cacheHitCostPerMToken,
       0
     );
 
@@ -273,6 +286,7 @@ export async function saveCustomOpenAIModels(
       apiKeyEnc,
       inputCostPerMToken,
       outputCostPerMToken,
+      cacheHitCostPerMToken,
       enabled: rawItem.enabled !== false,
       createdAt: previous?.createdAt || nowIso,
       updatedAt: nowIso,
@@ -317,6 +331,7 @@ export async function getRuntimeModelDefinition(
         apiKey: providerConfig.anthropicApiKey,
         inputCostPerMToken: builtin.inputCostPerMToken,
         outputCostPerMToken: builtin.outputCostPerMToken,
+        cacheHitCostPerMToken: builtin.cacheHitCostPerMToken,
       };
     }
     if (builtin.id === "deepseek") {
@@ -330,6 +345,7 @@ export async function getRuntimeModelDefinition(
         apiKey: providerConfig.deepseekApiKey,
         inputCostPerMToken: builtin.inputCostPerMToken,
         outputCostPerMToken: builtin.outputCostPerMToken,
+        cacheHitCostPerMToken: builtin.cacheHitCostPerMToken,
       };
     }
     return {
@@ -342,6 +358,7 @@ export async function getRuntimeModelDefinition(
       apiKey: providerConfig.zhipuApiKey,
       inputCostPerMToken: builtin.inputCostPerMToken,
       outputCostPerMToken: builtin.outputCostPerMToken,
+      cacheHitCostPerMToken: builtin.cacheHitCostPerMToken,
     };
   }
 
@@ -361,19 +378,22 @@ export async function getRuntimeModelDefinition(
     apiKey: decryptSecret(custom.apiKeyEnc),
     inputCostPerMToken: custom.inputCostPerMToken,
     outputCostPerMToken: custom.outputCostPerMToken,
+    cacheHitCostPerMToken: custom.cacheHitCostPerMToken,
   };
 }
 
 export async function getModelPricing(modelId: string): Promise<{
   input: number;
   output: number;
+  cache: number;
 }> {
   const runtimeModel = await getRuntimeModelDefinition(modelId);
   if (!runtimeModel) {
-    return { input: 0, output: 0 };
+    return { input: 0, output: 0, cache: 0 };
   }
   return {
     input: runtimeModel.inputCostPerMToken,
     output: runtimeModel.outputCostPerMToken,
+    cache: runtimeModel.cacheHitCostPerMToken,
   };
 }

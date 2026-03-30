@@ -1,33 +1,24 @@
 export const plans = {
   BASIC: {
-    name: "基础版",
-    price: 9900, // 分
-    priceYuan: 99,
-    description: "适合简单的管理系统类选题",
-    features: ["AI 代码生成", "AI 论文生成", "3 次修改机会", "1 次预览"],
-    opusBudget: 2,
-    modifyLimit: 3,
-    previewLimit: 1,
+    name: "点数包-基础",
+    price: 990, // 分
+    priceYuan: 9.9,
+    points: 12_000,
+    description: "适合轻量体验，含基础 AI 生成点数",
   },
   STANDARD: {
-    name: "标准版",
-    price: 19900,
-    priceYuan: 199,
-    description: "适合中等复杂度选题，推荐",
-    features: ["AI 代码生成", "AI 论文生成", "10 次修改", "3 次预览", "答辩辅导"],
-    opusBudget: 5,
-    modifyLimit: 10,
-    previewLimit: 3,
+    name: "点数包-标准",
+    price: 2990,
+    priceYuan: 29.9,
+    points: 42_000,
+    description: "主力推荐，满足日常项目多轮生成与修改",
   },
   PREMIUM: {
-    name: "高级版",
-    price: 39900,
-    priceYuan: 399,
-    description: "适合复杂选题，含全部功能",
-    features: ["AI 代码生成", "AI 论文生成", "无限修改", "10 次预览", "答辩辅导", "1v1 问答"],
-    opusBudget: 15,
-    modifyLimit: 999,
-    previewLimit: 10,
+    name: "点数包-高阶",
+    price: 9990,
+    priceYuan: 99.9,
+    points: 160_000,
+    description: "适合重度使用，覆盖代码/论文高频生成场景",
   },
 } as const;
 

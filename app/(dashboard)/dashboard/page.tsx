@@ -83,7 +83,7 @@ export default async function DashboardPage() {
               </Link>
             </Button>
             <Button variant="outline" asChild>
-              <Link href="/dashboard/referral">查看邀请奖励</Link>
+              <Link href="/dashboard/referral">查看推广链接</Link>
             </Button>
           </div>
         </div>
@@ -181,7 +181,7 @@ export default async function DashboardPage() {
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-medium">邀请好友</p>
-                <p className="text-xs text-muted-foreground">分享邀请码，获得额外奖励额度</p>
+                <p className="text-xs text-muted-foreground">生成推广链接，便于邀请同学注册</p>
               </div>
             </Link>
           </CardContent>

@@ -82,6 +82,34 @@ enum JobStatus {
   FAILED
 }
 
+enum TokenLedgerType {
+  INIT_GRANT
+  RECHARGE
+  FREEZE
+  SETTLE
+  REFUND
+  MANUAL_ADJUST
+  ROLLBACK
+}
+
+enum TokenReservationStatus {
+  ACTIVE
+  SETTLED
+  RELEASED
+}
+
+enum TaskTokenSettlementStatus {
+  NONE
+  FROZEN
+  SETTLED
+  REFUNDED
+}
+
+enum FeedbackStatus {
+  OPEN
+  RESOLVED
+}
+
 model User {
   id        String   @id @default(cuid())
   phone     String?  @unique
@@ -101,9 +129,14 @@ model User {
   aiUsageLogs   AiUsageLog[]
   notifications Notification[]
   inviteCodes   InviteCode[]
+  feedbacks     UserFeedback[] @relation("FeedbackAuthor")
+  resolvedFeedbacks UserFeedback[] @relation("FeedbackResolver")
   thesisTemplates ThesisTemplate[] @relation("TemplateCreator")
   announcements   Announcement[]   @relation("AnnouncementCreator")
   adminAuditLogs  AdminAuditLog[]  @relation("AdminAuditActor")
+  tokenWallet     UserTokenWallet?
+  tokenReservations TokenReservation[]
+  tokenLedgers    TokenLedger[]
 
   @@index([email])
   @@index([phone])
@@ -149,6 +182,8 @@ model Workspace {
   chatMessages ChatMessage[]
   files        WorkspaceFile[]
   taskJobs     TaskJob[]
+  tokenReservations TokenReservation[]
+  tokenLedgers TokenLedger[]
 
   @@index([userId])
   @@index([status])
@@ -196,19 +231,26 @@ model AiUsageLog {
   id           String     @id @default(cuid())
   userId       String
   workspaceId  String
+  taskJobId    String?
   taskType     AiTaskType
   model        String
   inputTokens  Int
   outputTokens Int
+  cacheHitTokens Int      @default(0)
   costYuan     Decimal    @db.Decimal(10, 6)
+  billedPoints Int        @default(0)
+  pointRate    Int        @default(1000)
+  billingMultiplier Decimal @default(1) @db.Decimal(8, 4)
   durationMs   Int
   createdAt    DateTime   @default(now())
 
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  taskJob   TaskJob?  @relation(fields: [taskJobId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([workspaceId])
+  @@index([taskJobId])
   @@index([createdAt])
 }
 
@@ -275,15 +317,102 @@ model TaskJob {
   type        JobType
   status      JobStatus @default(PENDING)
   progress    Int       @default(0)
+  tokenReservedPoints Int @default(0)
+  tokenSettledPoints Int @default(0)
+  tokenCostYuan Decimal @default(0) @db.Decimal(12, 6)
+  tokenSettlementStatus TaskTokenSettlementStatus @default(NONE)
+  tokenSettledAt DateTime?
   result      Json?
   error       String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  tokenReservation  TokenReservation?
+  tokenLedgers      TokenLedger[]
+  aiUsageLogs       AiUsageLog[]
 
   @@index([workspaceId])
   @@index([status])
+}
+
+model UserTokenWallet {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  totalPoints    Int      @default(0)
+  availablePoints Int     @default(0)
+  frozenPoints   Int      @default(0)
+  usedPoints     Int      @default(0)
+  dailyUsedPoints Int     @default(0)
+  dailyUsageDate String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([dailyUsageDate])
+}
+
+model TokenReservation {
+  id            String                 @id @default(cuid())
+  userId        String
+  workspaceId   String?
+  taskJobId     String?                @unique
+  source        String
+  reservedPoints Int
+  settledPoints Int                    @default(0)
+  status        TokenReservationStatus @default(ACTIVE)
+  metadata      Json?
+  settledAt     DateTime?
+  releasedAt    DateTime?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace    Workspace?  @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  taskJob      TaskJob?    @relation(fields: [taskJobId], references: [id], onDelete: SetNull)
+  tokenLedgers TokenLedger[]
+
+  @@index([userId, status, createdAt])
+  @@index([workspaceId, createdAt])
+}
+
+model TokenLedger {
+  id                   String          @id @default(cuid())
+  userId               String
+  workspaceId          String?
+  taskJobId            String?
+  reservationId        String?
+  type                 TokenLedgerType
+  deltaAvailablePoints Int             @default(0)
+  deltaFrozenPoints    Int             @default(0)
+  deltaUsedPoints      Int             @default(0)
+  availableAfter       Int             @default(0)
+  frozenAfter          Int             @default(0)
+  usedAfter            Int             @default(0)
+  billedPoints         Int             @default(0)
+  pointRate            Int             @default(1000)
+  billingMultiplier    Decimal         @default(1) @db.Decimal(8, 4)
+  model                String?
+  taskType             AiTaskType?
+  inputTokens          Int             @default(0)
+  outputTokens         Int             @default(0)
+  cacheHitTokens       Int             @default(0)
+  costYuan             Decimal         @default(0) @db.Decimal(12, 6)
+  description          String?
+  metadata             Json?
+  createdAt            DateTime        @default(now())
+
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace?        @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  taskJob     TaskJob?          @relation(fields: [taskJobId], references: [id], onDelete: SetNull)
+  reservation TokenReservation? @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([workspaceId, createdAt])
+  @@index([taskJobId])
+  @@index([reservationId])
+  @@index([type, createdAt])
 }
 
 model SystemConfig {
@@ -325,4 +454,25 @@ model Announcement {
   createdBy User? @relation("AnnouncementCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([isPublished, createdAt])
+}
+
+model UserFeedback {
+  id           String         @id @default(cuid())
+  userId       String
+  content      String         @db.Text
+  contact      String?
+  pagePath     String?
+  imageKeys    String[]       @default([])
+  status       FeedbackStatus @default(OPEN)
+  adminNote    String?        @db.Text
+  resolvedAt   DateTime?
+  resolvedById String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  user       User  @relation("FeedbackAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  resolvedBy User? @relation("FeedbackResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
 }

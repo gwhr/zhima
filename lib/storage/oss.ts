@@ -11,15 +11,37 @@ const LOCAL_STORAGE_DIR = path.join(process.cwd(), ".storage");
 
 type StorageProvider = "local" | "oss";
 
-const OSS_REGION = process.env.OSS_REGION || "";
-const OSS_ENDPOINT = process.env.OSS_ENDPOINT || "";
-const OSS_BUCKET = process.env.OSS_BUCKET || "";
-const OSS_ACCESS_KEY_ID =
-  process.env.OSS_ACCESS_KEY_ID || process.env.OSS_ACCESS_KEY || "";
-const OSS_ACCESS_KEY_SECRET =
-  process.env.OSS_ACCESS_KEY_SECRET || process.env.OSS_SECRET_KEY || "";
+type OssRuntimeConfig = {
+  region: string;
+  endpoint: string;
+  bucket: string;
+  accessKeyId: string;
+  accessKeySecret: string;
+};
 
 let cachedClient: OSS | null = null;
+let cachedClientSignature = "";
+
+function getOssRuntimeConfig(): OssRuntimeConfig {
+  return {
+    region: process.env.OSS_REGION || "",
+    endpoint: process.env.OSS_ENDPOINT || "",
+    bucket: process.env.OSS_BUCKET || "",
+    accessKeyId: process.env.OSS_ACCESS_KEY_ID || process.env.OSS_ACCESS_KEY || "",
+    accessKeySecret:
+      process.env.OSS_ACCESS_KEY_SECRET || process.env.OSS_SECRET_KEY || "",
+  };
+}
+
+function getOssClientSignature(config: OssRuntimeConfig) {
+  return [
+    config.region,
+    config.endpoint,
+    config.bucket,
+    config.accessKeyId,
+    config.accessKeySecret,
+  ].join("|");
+}
 
 function sanitizeStorageKey(key: string): string {
   const normalized = key.replace(/\\/g, "/").replace(/^\/+/, "").trim();
@@ -37,11 +59,12 @@ function detectProvider(): StorageProvider {
   if (configured === "local") return "local";
   if (configured === "oss") return "oss";
 
+  const ossConfig = getOssRuntimeConfig();
   if (
-    OSS_REGION &&
-    OSS_BUCKET &&
-    OSS_ACCESS_KEY_ID &&
-    OSS_ACCESS_KEY_SECRET
+    ossConfig.region &&
+    ossConfig.bucket &&
+    ossConfig.accessKeyId &&
+    ossConfig.accessKeySecret
   ) {
     return "oss";
   }
@@ -49,19 +72,23 @@ function detectProvider(): StorageProvider {
 }
 
 function getOssClient(): OSS {
-  if (cachedClient) return cachedClient;
-  if (!OSS_REGION) throw new Error("Missing OSS_REGION");
-  if (!OSS_BUCKET) throw new Error("Missing OSS_BUCKET");
-  if (!OSS_ACCESS_KEY_ID) throw new Error("Missing OSS_ACCESS_KEY_ID");
-  if (!OSS_ACCESS_KEY_SECRET) throw new Error("Missing OSS_ACCESS_KEY_SECRET");
+  const ossConfig = getOssRuntimeConfig();
+  if (!ossConfig.region) throw new Error("Missing OSS_REGION");
+  if (!ossConfig.bucket) throw new Error("Missing OSS_BUCKET");
+  if (!ossConfig.accessKeyId) throw new Error("Missing OSS_ACCESS_KEY_ID");
+  if (!ossConfig.accessKeySecret) throw new Error("Missing OSS_ACCESS_KEY_SECRET");
+
+  const signature = getOssClientSignature(ossConfig);
+  if (cachedClient && cachedClientSignature === signature) return cachedClient;
 
   cachedClient = new OSS({
-    region: OSS_REGION,
-    endpoint: OSS_ENDPOINT || undefined,
-    bucket: OSS_BUCKET,
-    accessKeyId: OSS_ACCESS_KEY_ID,
-    accessKeySecret: OSS_ACCESS_KEY_SECRET,
+    region: ossConfig.region,
+    endpoint: ossConfig.endpoint || undefined,
+    bucket: ossConfig.bucket,
+    accessKeyId: ossConfig.accessKeyId,
+    accessKeySecret: ossConfig.accessKeySecret,
   });
+  cachedClientSignature = signature;
 
   return cachedClient;
 }

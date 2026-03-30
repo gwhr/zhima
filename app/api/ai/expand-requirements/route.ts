@@ -29,6 +29,16 @@ export async function POST(req: Request) {
       : `
 专业分类：计算机相关专业。
 需求可包含标准的软件工程实践内容，兼顾功能完整性与工程实现。`;
+  const directionPrompt = `
+方向限制（必须遵守）：
+1. 当前仅输出“信息系统/软件工程类毕设”需求，聚焦用户端、管理端、数据库与业务流程。
+2. 不输出纯算法研究、模型训练、硬件控制、实验装置类实现。
+3. 若选题含算法导向词（如目标检测），请转为“算法结果管理与展示系统”需求，并给出可答辩的系统化模块。`;
+  const dualEndPrompt = `
+补充约束：
+1. 默认按“双端系统”规划，至少包含“用户端”与“管理端（后台）”两类角色。
+2. modules 中至少给出一个用户端模块和一个管理端模块。
+3. 如题目明显是单端系统，再按题目合理缩减，并在 summary 里说明原因。`;
 
   const model = await getRuntimeModel("glm");
 
@@ -39,6 +49,8 @@ export async function POST(req: Request) {
 选题：${topic}
 技术栈：${techStr}
 ${categoryPrompt}
+${directionPrompt}
+${dualEndPrompt}
 
 请严格按以下 JSON 格式返回，不要有任何多余文字：
 

@@ -3,29 +3,32 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
+import { useSession } from "next-auth/react";
 import {
-  LayoutDashboard,
   FolderOpen,
-  UserCircle,
+  LayoutDashboard,
+  MessageSquare,
   Plus,
   Share2,
   ShieldCheck,
+  UserCircle,
+  WalletCards,
 } from "lucide-react";
-import { useSession } from "next-auth/react";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
 
 interface Workspace {
   id: string;
   name: string;
-  status: string;
 }
 
 const navItems = [
   { href: "/dashboard", icon: LayoutDashboard, label: "仪表盘" },
   { href: "/workspace", icon: FolderOpen, label: "工作空间" },
-  { href: "/dashboard/referral", icon: Share2, label: "邀请好友" },
+  { href: "/dashboard/billing", icon: WalletCards, label: "Token 余额" },
+  { href: "/dashboard/feedback", icon: MessageSquare, label: "用户反馈" },
+  { href: "/dashboard/referral", icon: Share2, label: "邀请推广" },
   { href: "/dashboard/profile", icon: UserCircle, label: "个人设置" },
 ];
 
@@ -36,9 +39,11 @@ export function Sidebar() {
 
   useEffect(() => {
     fetch("/api/workspace")
-      .then((r) => r.json())
+      .then((res) => res.json())
       .then((data) => {
-        if (data.success) setWorkspaces(data.data.slice(0, 10));
+        if (data.success) {
+          setWorkspaces((data.data || []).slice(0, 10));
+        }
       })
       .catch(() => {});
   }, []);
@@ -52,9 +57,7 @@ export function Sidebar() {
           <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
             User Console
           </p>
-          <p className="mt-1 text-sm font-semibold text-foreground">
-            你的项目工作区
-          </p>
+          <p className="mt-1 text-sm font-semibold text-foreground">你的项目工作区</p>
         </div>
 
         <nav className="space-y-1.5">
@@ -74,7 +77,9 @@ export function Sidebar() {
                 <span
                   className={cn(
                     "flex size-7 items-center justify-center rounded-lg border bg-white/80",
-                    active ? "border-primary/25 text-primary" : "border-border/70 text-muted-foreground",
+                    active
+                      ? "border-primary/25 text-primary"
+                      : "border-border/70 text-muted-foreground"
                   )}
                 >
                   <item.icon className="h-4 w-4" />
@@ -98,7 +103,7 @@ export function Sidebar() {
                   "flex size-7 items-center justify-center rounded-lg border bg-white/80",
                   pathname.startsWith("/admin")
                     ? "border-primary/25 text-primary"
-                    : "border-border/70 text-muted-foreground",
+                    : "border-border/70 text-muted-foreground"
                 )}
               >
                 <ShieldCheck className="h-4 w-4" />
@@ -111,9 +116,7 @@ export function Sidebar() {
         {workspaces.length > 0 && (
           <div className="mt-7 rounded-2xl border border-white/70 bg-white/75 p-3 shadow-[0_16px_45px_-32px_rgba(15,23,42,0.35)]">
             <div className="mb-2 flex items-center justify-between px-1">
-              <p className="text-xs font-semibold text-muted-foreground">
-                最近项目
-              </p>
+              <p className="text-xs font-semibold text-muted-foreground">最近项目</p>
               <Link href="/workspace">
                 <Button variant="ghost" size="icon-sm" className="rounded-lg">
                   <Plus className="h-3 w-3" />

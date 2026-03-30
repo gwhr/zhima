@@ -3,8 +3,9 @@ import { Providers } from "@/components/providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "智码 ZhiMa - 你的 AI 开发伙伴",
-  description: "描述你的毕设需求，AI 帮你生成代码 + 论文，一站搞定",
+  title: "智码 ZhiMa - 毕设辅导与开发助手",
+  description:
+    "面向毕业设计的辅导平台，提供需求拆解、代码示例和论文写作参考，辅助你独立完成项目。",
 };
 
 export default function RootLayout({

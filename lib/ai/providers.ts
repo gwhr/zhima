@@ -10,6 +10,7 @@ export interface BuiltinModelDefinition {
   defaultBaseUrl?: string;
   inputCostPerMToken: number;
   outputCostPerMToken: number;
+  cacheHitCostPerMToken: number;
 }
 
 export const builtinModelDefinitions: BuiltinModelDefinition[] = [
@@ -20,6 +21,7 @@ export const builtinModelDefinitions: BuiltinModelDefinition[] = [
     modelName: "claude-sonnet-4-20250514",
     inputCostPerMToken: 0.015,
     outputCostPerMToken: 0.075,
+    cacheHitCostPerMToken: 0,
   },
   {
     id: "deepseek",
@@ -29,6 +31,7 @@ export const builtinModelDefinitions: BuiltinModelDefinition[] = [
     defaultBaseUrl: "https://api.deepseek.com",
     inputCostPerMToken: 0.001,
     outputCostPerMToken: 0.002,
+    cacheHitCostPerMToken: 0,
   },
   {
     id: "glm",
@@ -36,8 +39,9 @@ export const builtinModelDefinitions: BuiltinModelDefinition[] = [
     provider: "openai-compatible",
     modelName: "glm-4-flash",
     defaultBaseUrl: "https://open.bigmodel.cn/api/paas/v4",
-    inputCostPerMToken: 0,
-    outputCostPerMToken: 0,
+    inputCostPerMToken: 7,
+    outputCostPerMToken: 21,
+    cacheHitCostPerMToken: 1.4,
   },
 ];
 
@@ -56,11 +60,13 @@ export function getBuiltinModelDefinition(
 export function getBuiltinModelPricing(modelId: string): {
   input: number;
   output: number;
+  cache: number;
 } | null {
   const model = getBuiltinModelDefinition(modelId);
   if (!model) return null;
   return {
     input: model.inputCostPerMToken,
     output: model.outputCostPerMToken,
+    cache: model.cacheHitCostPerMToken,
   };
 }

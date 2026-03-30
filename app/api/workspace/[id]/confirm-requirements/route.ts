@@ -153,6 +153,10 @@ function buildMajorCategoryContext(majorCategory: "computer" | "non-computer"): 
   return "专业分类：计算机相关专业。可按标准软件工程毕设要求评估。";
 }
 
+function buildDirectionScopeContext(): string {
+  return "方向限制：当前平台仅支持信息系统/软件工程类毕设。若用户提出目标检测/模型训练等算法研究诉求，请转译为“结果管理与展示平台”方案，不要输出训练脚本或硬件方案。";
+}
+
 async function evaluateDifficulty(
   topic: string,
   techStack: Record<string, unknown>,
@@ -176,6 +180,7 @@ async function evaluateDifficulty(
 - 功能模块数：${requirements.modules?.length || 0}
 - 数据表数：${requirements.tables?.length || 0}
 - ${buildMajorCategoryContext(requirements.majorCategory || "computer")}
+- ${buildDirectionScopeContext()}
 `;
 
   const model = await getRuntimeModel("glm");
@@ -203,6 +208,7 @@ function buildRevisePrompt(
 项目题目：${topic}
 技术栈：${techStackText || "未指定"}
 ${buildMajorCategoryContext(current.majorCategory || "computer")}
+${buildDirectionScopeContext()}
 
 当前需求（JSON）：
 ${JSON.stringify(current, null, 2)}

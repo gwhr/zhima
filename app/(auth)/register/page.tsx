@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -31,10 +31,25 @@ export default function RegisterPage() {
   const [code, setCode] = useState("");
   const [codeSending, setCodeSending] = useState(false);
   const [countdown, setCountdown] = useState(0);
+  const [inviteCode, setInviteCode] = useState("");
+  const [agreementAccepted, setAgreementAccepted] = useState(false);
+
+  useEffect(() => {
+    const ref = new URLSearchParams(window.location.search).get("ref");
+    if (ref) setInviteCode(ref.trim().toUpperCase());
+  }, []);
+
+  function ensureAgreementAccepted() {
+    if (agreementAccepted) return true;
+    setError("请先阅读并同意《用户协议》和《隐私政策》");
+    return false;
+  }
 
   async function handleEmailRegister(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+
+    if (!ensureAgreementAccepted()) return;
 
     if (password !== confirmPassword) {
       setError("两次输入的密码不一致");
@@ -45,7 +60,7 @@ export default function RegisterPage() {
     const res = await fetch("/api/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password, name }),
+      body: JSON.stringify({ email, password, name, inviteCode }),
     });
     const data = await res.json();
 
@@ -72,12 +87,15 @@ export default function RegisterPage() {
   async function handlePhoneRegister(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+
+    if (!ensureAgreementAccepted()) return;
+
     setLoading(true);
 
     const res = await fetch("/api/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone, code, name }),
+      body: JSON.stringify({ phone, code, name, inviteCode }),
     });
     const data = await res.json();
 
@@ -99,6 +117,8 @@ export default function RegisterPage() {
   }
 
   async function sendCode() {
+    if (!ensureAgreementAccepted()) return;
+
     if (!/^1[3-9]\d{9}$/.test(phone)) {
       setError("请输入正确的手机号");
       return;
@@ -130,6 +150,27 @@ export default function RegisterPage() {
       });
     }, 1000);
   }
+
+  const agreementBlock = (
+    <label className="w-full flex items-start gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-muted-foreground">
+      <input
+        type="checkbox"
+        className="mt-0.5 h-4 w-4 shrink-0 accent-cyan-600"
+        checked={agreementAccepted}
+        onChange={(e) => setAgreementAccepted(e.target.checked)}
+      />
+      <span>
+        我已阅读并同意
+        <Link href="/terms" className="mx-1 text-primary hover:underline">
+          《用户协议》
+        </Link>
+        和
+        <Link href="/privacy" className="ml-1 text-primary hover:underline">
+          《隐私政策》
+        </Link>
+      </span>
+    </label>
+  );
 
   return (
     <Card className="w-full max-w-md border-white/80 bg-white/88 shadow-[0_28px_65px_-42px_rgba(15,23,42,0.6)] backdrop-blur-sm">
@@ -211,9 +252,20 @@ export default function RegisterPage() {
                   minLength={6}
                 />
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="reg-invite-email">邀请码（选填）</Label>
+                <Input
+                  id="reg-invite-email"
+                  placeholder="输入邀请码可关联邀请推广"
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value.trim().toUpperCase())}
+                  maxLength={32}
+                />
+              </div>
             </CardContent>
             <CardFooter className="flex flex-col gap-3">
-              <Button type="submit" className="w-full" disabled={loading}>
+              {agreementBlock}
+              <Button type="submit" className="w-full" disabled={loading || !agreementAccepted}>
                 {loading ? "注册中..." : "注册"}
               </Button>
             </CardFooter>
@@ -260,15 +312,26 @@ export default function RegisterPage() {
                     variant="outline"
                     className="w-28 shrink-0"
                     onClick={sendCode}
-                    disabled={codeSending || countdown > 0}
+                    disabled={codeSending || countdown > 0 || !agreementAccepted}
                   >
                     {countdown > 0 ? `${countdown}s` : codeSending ? "发送中" : "获取验证码"}
                   </Button>
                 </div>
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="reg-invite-phone">邀请码（选填）</Label>
+                <Input
+                  id="reg-invite-phone"
+                  placeholder="输入邀请码可关联邀请推广"
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value.trim().toUpperCase())}
+                  maxLength={32}
+                />
+              </div>
             </CardContent>
             <CardFooter className="flex flex-col gap-3">
-              <Button type="submit" className="w-full" disabled={loading}>
+              {agreementBlock}
+              <Button type="submit" className="w-full" disabled={loading || !agreementAccepted}>
                 {loading ? "注册中..." : "注册"}
               </Button>
             </CardFooter>

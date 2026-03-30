@@ -25,6 +25,14 @@ type ModelOptionDetail = {
   source: "builtin" | "custom";
 };
 
+type BuiltinPricingRow = {
+  id: string;
+  name: string;
+  inputCostPerMToken: number;
+  outputCostPerMToken: number;
+  cacheHitCostPerMToken: number;
+};
+
 type CustomOpenAIModelView = {
   id: string;
   name: string;
@@ -32,6 +40,7 @@ type CustomOpenAIModelView = {
   baseUrl: string;
   inputCostPerMToken: number;
   outputCostPerMToken: number;
+  cacheHitCostPerMToken: number;
   enabled: boolean;
   apiKeyMasked: string;
   apiKeySource: "admin" | "none";
@@ -45,6 +54,7 @@ type CustomOpenAIModelForm = {
   baseUrl: string;
   inputCostPerMToken: number;
   outputCostPerMToken: number;
+  cacheHitCostPerMToken: number;
   enabled: boolean;
   apiKey: string;
   apiKeyMasked: string;
@@ -54,6 +64,7 @@ type CustomOpenAIModelForm = {
 type ModelsResponse = {
   modelOptions: string[];
   modelOptionDetails?: ModelOptionDetail[];
+  builtinPricing?: BuiltinPricingRow[];
   config: {
     codeGenModelId: string;
     thesisGenModelId: string;
@@ -62,18 +73,18 @@ type ModelsResponse = {
   customOpenAIModels?: CustomOpenAIModelView[];
 };
 
-type TestStatusState = {
+type TestStatus = {
   ok: boolean;
   text: string;
 };
 
 function sourceText(source: KeySource) {
-  if (source === "admin") return "后台覆盖";
+  if (source === "admin") return "后台配置";
   if (source === "env") return "环境变量";
   return "未配置";
 }
 
-function customKeySourceText(source: "admin" | "none") {
+function customSourceText(source: "admin" | "none") {
   return source === "admin" ? "后台已保存" : "未配置";
 }
 
@@ -88,6 +99,10 @@ function toCustomFormModel(item?: Partial<CustomOpenAIModelView>): CustomOpenAIM
       typeof item?.inputCostPerMToken === "number" ? item.inputCostPerMToken : 0,
     outputCostPerMToken:
       typeof item?.outputCostPerMToken === "number" ? item.outputCostPerMToken : 0,
+    cacheHitCostPerMToken:
+      typeof item?.cacheHitCostPerMToken === "number"
+        ? item.cacheHitCostPerMToken
+        : 0,
     enabled: item?.enabled !== false,
     apiKey: "",
     apiKeyMasked: item?.apiKeyMasked || "未配置",
@@ -100,11 +115,12 @@ export default function AdminModelsPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [testingTarget, setTestingTarget] = useState<string | null>(null);
-  const [testStatusMap, setTestStatusMap] = useState<
-    Record<string, TestStatusState>
-  >({});
+  const [testStatusMap, setTestStatusMap] = useState<Record<string, TestStatus>>(
+    {}
+  );
 
   const [modelOptions, setModelOptions] = useState<ModelOptionDetail[]>([]);
+  const [builtinPricing, setBuiltinPricing] = useState<BuiltinPricingRow[]>([]);
   const [codeGenModelId, setCodeGenModelId] = useState("");
   const [thesisGenModelId, setThesisGenModelId] = useState("");
   const [providers, setProviders] = useState<ModelProviderView | null>(null);
@@ -117,6 +133,44 @@ export default function AdminModelsPage() {
   const [zhipuApiKey, setZhipuApiKey] = useState("");
   const [deepseekBaseUrl, setDeepseekBaseUrl] = useState("");
   const [zhipuBaseUrl, setZhipuBaseUrl] = useState("");
+
+  async function loadData() {
+    setLoading(true);
+    setMessage(null);
+    const response = await fetch("/api/admin/models");
+    const result = await response.json();
+    if (!result.success) {
+      setLoading(false);
+      setMessage(result.error || "加载模型配置失败");
+      return;
+    }
+
+    const data = result.data as ModelsResponse;
+    const options =
+      data.modelOptionDetails && data.modelOptionDetails.length > 0
+        ? data.modelOptionDetails
+        : (data.modelOptions || []).map((id) => ({
+            id,
+            name: id,
+            source: "builtin" as const,
+          }));
+
+    setModelOptions(options);
+    setBuiltinPricing(data.builtinPricing || []);
+    setCodeGenModelId(data.config.codeGenModelId);
+    setThesisGenModelId(data.config.thesisGenModelId);
+    setProviders(data.providers);
+    setDeepseekBaseUrl(data.providers.deepseekBaseUrl);
+    setZhipuBaseUrl(data.providers.zhipuBaseUrl);
+    setCustomOpenAIModels(
+      (data.customOpenAIModels || []).map((item) => toCustomFormModel(item))
+    );
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    void loadData();
+  }, []);
 
   const payloadPreview = useMemo(() => {
     const payload: Record<string, unknown> = {
@@ -131,57 +185,27 @@ export default function AdminModelsPage() {
         baseUrl: item.baseUrl.trim(),
         inputCostPerMToken: Number(item.inputCostPerMToken) || 0,
         outputCostPerMToken: Number(item.outputCostPerMToken) || 0,
+        cacheHitCostPerMToken: Number(item.cacheHitCostPerMToken) || 0,
         enabled: item.enabled,
         apiKey: item.apiKey.trim(),
       })),
     };
+
     if (anthropicApiKey.trim()) payload.anthropicApiKey = anthropicApiKey.trim();
     if (deepseekApiKey.trim()) payload.deepseekApiKey = deepseekApiKey.trim();
     if (zhipuApiKey.trim()) payload.zhipuApiKey = zhipuApiKey.trim();
+
     return payload;
   }, [
     anthropicApiKey,
     codeGenModelId,
+    customOpenAIModels,
     deepseekApiKey,
     deepseekBaseUrl,
     thesisGenModelId,
-    customOpenAIModels,
     zhipuApiKey,
     zhipuBaseUrl,
   ]);
-
-  async function loadData() {
-    setLoading(true);
-    const response = await fetch("/api/admin/models");
-    const result = await response.json();
-    if (result.success) {
-      const data = result.data as ModelsResponse;
-      const options =
-        data.modelOptionDetails && data.modelOptionDetails.length > 0
-          ? data.modelOptionDetails
-          : (data.modelOptions || []).map((id) => ({
-              id,
-              name: id,
-              source: "builtin" as const,
-            }));
-      setModelOptions(options);
-      setCodeGenModelId(data.config.codeGenModelId);
-      setThesisGenModelId(data.config.thesisGenModelId);
-      setProviders(data.providers);
-      setDeepseekBaseUrl(data.providers.deepseekBaseUrl);
-      setZhipuBaseUrl(data.providers.zhipuBaseUrl);
-      setCustomOpenAIModels(
-        (data.customOpenAIModels || []).map((item) => toCustomFormModel(item))
-      );
-    } else {
-      setMessage(result.error || "加载模型管理配置失败");
-    }
-    setLoading(false);
-  }
-
-  useEffect(() => {
-    void loadData();
-  }, []);
 
   async function save() {
     setSaving(true);
@@ -196,30 +220,11 @@ export default function AdminModelsPage() {
       if (!result.success) {
         throw new Error(result.error || "保存失败");
       }
-
-      const data = result.data as ModelsResponse;
-      const options =
-        data.modelOptionDetails && data.modelOptionDetails.length > 0
-          ? data.modelOptionDetails
-          : (data.modelOptions || []).map((id) => ({
-              id,
-              name: id,
-              source: "builtin" as const,
-            }));
-      setModelOptions(options);
-      setCodeGenModelId(data.config.codeGenModelId);
-      setThesisGenModelId(data.config.thesisGenModelId);
-      setProviders(data.providers);
-      setDeepseekBaseUrl(data.providers.deepseekBaseUrl);
-      setZhipuBaseUrl(data.providers.zhipuBaseUrl);
-      setCustomOpenAIModels(
-        (data.customOpenAIModels || []).map((item) => toCustomFormModel(item))
-      );
-
       setAnthropicApiKey("");
       setDeepseekApiKey("");
       setZhipuApiKey("");
-      setMessage("模型管理配置已保存");
+      setMessage("模型配置已保存");
+      await loadData();
     } catch (saveError) {
       setMessage(saveError instanceof Error ? saveError.message : "保存失败");
     } finally {
@@ -227,63 +232,19 @@ export default function AdminModelsPage() {
     }
   }
 
-  function addCustomOpenAIModel() {
-    setCustomOpenAIModels((prev) => [...prev, toCustomFormModel()]);
-  }
-
-  function removeCustomOpenAIModel(localId: string) {
-    const testKey = `custom:${localId}`;
-    setTestStatusMap((prev) => {
-      if (!(testKey in prev)) return prev;
-      const next = { ...prev };
-      delete next[testKey];
-      return next;
-    });
-    setCustomOpenAIModels((prev) => {
-      const target = prev.find((item) => item.localId === localId);
-      if (target) {
-        if (target.id === codeGenModelId) setCodeGenModelId("deepseek");
-        if (target.id === thesisGenModelId) setThesisGenModelId("glm");
-      }
-      return prev.filter((item) => item.localId !== localId);
-    });
-  }
-
-  function updateCustomOpenAIModel(
-    localId: string,
-    patch: Partial<CustomOpenAIModelForm>
-  ) {
-    setCustomOpenAIModels((prev) =>
-      prev.map((item) =>
-        item.localId === localId
-          ? {
-              ...item,
-              ...patch,
-            }
-          : item
-      )
-    );
-  }
-
-  function setTestStatus(
-    key: string,
-    status: TestStatusState | null
-  ) {
+  function setTestStatus(key: string, status: TestStatus | null) {
     setTestStatusMap((prev) => {
       const next = { ...prev };
-      if (!status) {
-        delete next[key];
-      } else {
-        next[key] = status;
-      }
+      if (!status) delete next[key];
+      else next[key] = status;
       return next;
     });
   }
 
   async function testBuiltinModel(modelId: "opus" | "deepseek" | "glm") {
-    const key = `builtin:${modelId}`;
-    setTestingTarget(key);
-    setTestStatus(key, null);
+    const stateKey = `builtin:${modelId}`;
+    setTestingTarget(stateKey);
+    setTestStatus(stateKey, null);
     try {
       const payload: Record<string, unknown> = {
         kind: "builtin",
@@ -310,19 +271,20 @@ export default function AdminModelsPage() {
       if (!response.ok || !result?.success) {
         throw new Error(result?.error || "连接测试失败");
       }
+
       const data = result.data || {};
       const latency = Number.isFinite(Number(data.latencyMs))
         ? `${Math.round(Number(data.latencyMs))}ms`
         : "-";
       const preview = typeof data.preview === "string" ? data.preview : "";
-      setTestStatus(key, {
+      setTestStatus(stateKey, {
         ok: true,
-        text: `连接成功（${latency}）${preview ? `，返回：${preview}` : ""}`,
+        text: `连接成功，耗时 ${latency}${preview ? `，返回：${preview}` : ""}`,
       });
-    } catch (err) {
-      setTestStatus(key, {
+    } catch (testError) {
+      setTestStatus(stateKey, {
         ok: false,
-        text: err instanceof Error ? err.message : "连接测试失败",
+        text: testError instanceof Error ? testError.message : "连接测试失败",
       });
     } finally {
       setTestingTarget(null);
@@ -330,9 +292,9 @@ export default function AdminModelsPage() {
   }
 
   async function testCustomModel(item: CustomOpenAIModelForm) {
-    const key = `custom:${item.localId}`;
-    setTestingTarget(key);
-    setTestStatus(key, null);
+    const stateKey = `custom:${item.localId}`;
+    setTestingTarget(stateKey);
+    setTestStatus(stateKey, null);
     try {
       const payload: Record<string, unknown> = {
         kind: "custom",
@@ -340,9 +302,7 @@ export default function AdminModelsPage() {
         modelName: item.modelName.trim(),
         baseUrl: item.baseUrl.trim(),
       };
-      if (item.apiKey.trim()) {
-        payload.apiKey = item.apiKey.trim();
-      }
+      if (item.apiKey.trim()) payload.apiKey = item.apiKey.trim();
 
       const response = await fetch("/api/admin/models/test", {
         method: "POST",
@@ -353,23 +313,43 @@ export default function AdminModelsPage() {
       if (!response.ok || !result?.success) {
         throw new Error(result?.error || "连接测试失败");
       }
+
       const data = result.data || {};
       const latency = Number.isFinite(Number(data.latencyMs))
         ? `${Math.round(Number(data.latencyMs))}ms`
         : "-";
       const preview = typeof data.preview === "string" ? data.preview : "";
-      setTestStatus(key, {
+      setTestStatus(stateKey, {
         ok: true,
-        text: `连接成功（${latency}）${preview ? `，返回：${preview}` : ""}`,
+        text: `连接成功，耗时 ${latency}${preview ? `，返回：${preview}` : ""}`,
       });
-    } catch (err) {
-      setTestStatus(key, {
+    } catch (testError) {
+      setTestStatus(stateKey, {
         ok: false,
-        text: err instanceof Error ? err.message : "连接测试失败",
+        text: testError instanceof Error ? testError.message : "连接测试失败",
       });
     } finally {
       setTestingTarget(null);
     }
+  }
+
+  function addCustomOpenAIModel() {
+    setCustomOpenAIModels((prev) => [...prev, toCustomFormModel()]);
+  }
+
+  function removeCustomOpenAIModel(localId: string) {
+    const statusKey = `custom:${localId}`;
+    setTestStatus(statusKey, null);
+    setCustomOpenAIModels((prev) => prev.filter((item) => item.localId !== localId));
+  }
+
+  function updateCustomOpenAIModel(
+    localId: string,
+    patch: Partial<CustomOpenAIModelForm>
+  ) {
+    setCustomOpenAIModels((prev) =>
+      prev.map((item) => (item.localId === localId ? { ...item, ...patch } : item))
+    );
   }
 
   const optionLabel = useMemo(
@@ -385,16 +365,59 @@ export default function AdminModelsPage() {
 
   if (loading || !providers) {
     return (
-      <div className="p-6 flex items-center gap-2 text-muted-foreground">
+      <div className="flex items-center gap-2 p-6 text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" />
-        加载模型管理配置...
+        正在加载模型配置...
       </div>
     );
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6 p-6">
       <h1 className="text-2xl font-bold">模型管理</h1>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">模型价格表（元 / 1M tokens）</CardTitle>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-muted-foreground">
+                <th className="px-2 py-3 text-left font-medium">模型</th>
+                <th className="px-2 py-3 text-left font-medium">模型 ID</th>
+                <th className="px-2 py-3 text-right font-medium">输入单价</th>
+                <th className="px-2 py-3 text-right font-medium">输出单价</th>
+                <th className="px-2 py-3 text-right font-medium">缓存命中单价</th>
+              </tr>
+            </thead>
+            <tbody>
+              {builtinPricing.map((item) => (
+                <tr key={item.id} className="border-b last:border-0">
+                  <td className="px-2 py-3">{item.name}</td>
+                  <td className="px-2 py-3 font-mono text-xs">{item.id}</td>
+                  <td className="px-2 py-3 text-right tabular-nums">
+                    {item.inputCostPerMToken.toFixed(6)}
+                  </td>
+                  <td className="px-2 py-3 text-right tabular-nums">
+                    {item.outputCostPerMToken.toFixed(6)}
+                  </td>
+                  <td className="px-2 py-3 text-right tabular-nums">
+                    {item.cacheHitCostPerMToken.toFixed(6)}
+                  </td>
+                </tr>
+              ))}
+              {builtinPricing.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-2 py-6 text-center text-muted-foreground">
+                    暂无内置模型价格
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-3">
@@ -435,12 +458,12 @@ export default function AdminModelsPage() {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">模型 Key 配置</CardTitle>
+          <CardTitle className="text-base">内置模型 Key 配置</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="rounded-md border p-3 space-y-2">
+          <div className="space-y-2 rounded-md border p-3">
             <div className="flex items-center justify-between gap-2">
-              <div className="text-sm font-medium">Anthropic（opus）</div>
+              <div className="text-sm font-medium">Anthropic (opus)</div>
               <Button
                 type="button"
                 variant="outline"
@@ -476,7 +499,7 @@ export default function AdminModelsPage() {
             )}
           </div>
 
-          <div className="rounded-md border p-3 space-y-2">
+          <div className="space-y-2 rounded-md border p-3">
             <div className="flex items-center justify-between gap-2">
               <div className="text-sm font-medium">DeepSeek</div>
               <Button
@@ -521,7 +544,7 @@ export default function AdminModelsPage() {
             )}
           </div>
 
-          <div className="rounded-md border p-3 space-y-2">
+          <div className="space-y-2 rounded-md border p-3">
             <div className="flex items-center justify-between gap-2">
               <div className="text-sm font-medium">智谱 GLM</div>
               <Button
@@ -563,10 +586,6 @@ export default function AdminModelsPage() {
               </p>
             )}
           </div>
-
-          <p className="text-xs text-muted-foreground">
-            说明：Key 在后台加密存储。你可以只改模型选择，不改 Key；也可以只改 Key，不改模型。
-          </p>
         </CardContent>
       </Card>
 
@@ -578,9 +597,9 @@ export default function AdminModelsPage() {
           {customOpenAIModels.map((item, index) => (
             <div
               key={item.localId}
-              className="rounded-md border p-3 space-y-3 bg-muted/20"
+              className="space-y-3 rounded-md border bg-muted/20 p-3"
             >
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-medium">自定义模型 #{index + 1}</p>
                 <div className="flex items-center gap-2">
                   <Button
@@ -589,8 +608,7 @@ export default function AdminModelsPage() {
                     size="sm"
                     onClick={() => void testCustomModel(item)}
                     disabled={Boolean(
-                      testingTarget &&
-                        testingTarget !== `custom:${item.localId}`
+                      testingTarget && testingTarget !== `custom:${item.localId}`
                     )}
                   >
                     {testingTarget === `custom:${item.localId}` && (
@@ -604,7 +622,7 @@ export default function AdminModelsPage() {
                     size="sm"
                     onClick={() => removeCustomOpenAIModel(item.localId)}
                   >
-                    <Trash2 className="h-4 w-4 mr-1" />
+                    <Trash2 className="mr-1 h-4 w-4" />
                     删除
                   </Button>
                 </div>
@@ -664,11 +682,9 @@ export default function AdminModelsPage() {
                 </label>
               </div>
 
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-3 md:grid-cols-3">
                 <label className="space-y-1 text-sm">
-                  <span className="text-muted-foreground">
-                    输入单价（元 / 1M tokens）
-                  </span>
+                  <span className="text-muted-foreground">输入单价（元 / 1M tokens）</span>
                   <Input
                     type="number"
                     min={0}
@@ -682,9 +698,7 @@ export default function AdminModelsPage() {
                   />
                 </label>
                 <label className="space-y-1 text-sm">
-                  <span className="text-muted-foreground">
-                    输出单价（元 / 1M tokens）
-                  </span>
+                  <span className="text-muted-foreground">输出单价（元 / 1M tokens）</span>
                   <Input
                     type="number"
                     min={0}
@@ -697,12 +711,27 @@ export default function AdminModelsPage() {
                     }
                   />
                 </label>
+                <label className="space-y-1 text-sm">
+                  <span className="text-muted-foreground">
+                    缓存命中单价（元 / 1M tokens）
+                  </span>
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.000001"
+                    value={item.cacheHitCostPerMToken}
+                    onChange={(event) =>
+                      updateCustomOpenAIModel(item.localId, {
+                        cacheHitCostPerMToken: Number(event.target.value || 0),
+                      })
+                    }
+                  />
+                </label>
               </div>
 
               <div className="space-y-2">
                 <p className="text-xs text-muted-foreground">
-                  当前 Key：{item.apiKeyMasked}（来源：
-                  {customKeySourceText(item.apiKeySource)}）
+                  当前 Key：{item.apiKeyMasked}（来源：{customSourceText(item.apiKeySource)}）
                 </p>
                 <Input
                   type="password"
@@ -726,8 +755,9 @@ export default function AdminModelsPage() {
                     })
                   }
                 />
-                启用该模型（启用后才会出现在代码/论文模型下拉中）
+                启用该模型（启用后才会出现在模型下拉框中）
               </label>
+
               {testStatusMap[`custom:${item.localId}`] && (
                 <p
                   className={
@@ -743,14 +773,9 @@ export default function AdminModelsPage() {
           ))}
 
           <Button type="button" variant="outline" onClick={addCustomOpenAIModel}>
-            <Plus className="h-4 w-4 mr-1" />
+            <Plus className="mr-1 h-4 w-4" />
             新增 OpenAI 兼容模型
           </Button>
-
-          <p className="text-xs text-muted-foreground">
-            提示：新增模型后，保存成功才会出现在上方“模型选择”下拉中。模型 ID
-            建议使用小写英文、数字、`-`、`_`。
-          </p>
         </CardContent>
       </Card>
 

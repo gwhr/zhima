@@ -2,10 +2,22 @@ import { streamText } from "ai";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth-helpers";
 import { selectModel } from "@/lib/ai/router";
-import { ensureUserTokenQuota, recordUsage } from "@/lib/ai/usage";
+import { recordUsage } from "@/lib/ai/usage";
 import { getSystemPrompt } from "@/lib/ai/prompts";
 import { downloadFile } from "@/lib/storage/oss";
+import { freezeTokenReservation, releaseTokenReservation } from "@/lib/billing/token-wallet";
+import { getPlatformConfig } from "@/lib/system-config";
 import type { AiTaskType } from "@prisma/client";
+
+type TokenUsageLike = {
+  inputTokens?: number;
+  outputTokens?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  cacheHitTokens?: number;
+  cachedInputTokens?: number;
+  cacheReadInputTokens?: number;
+};
 
 async function buildProjectContext(workspaceId: string): Promise<string> {
   const workspace = await db.workspace.findUnique({ where: { id: workspaceId } });
@@ -49,10 +61,10 @@ async function buildProjectContext(workspaceId: string): Promise<string> {
   if (files.length > 0) {
     context += `\n--- 已生成的代码文件 ---\n`;
     let totalSize = 0;
-    const MAX_CONTEXT_SIZE = 12000;
+    const maxContextSize = 12_000;
 
     for (const file of files) {
-      if (totalSize > MAX_CONTEXT_SIZE) {
+      if (totalSize > maxContextSize) {
         context += `\n... 更多文件省略（共 ${files.length} 个）...\n`;
         break;
       }
@@ -70,6 +82,18 @@ async function buildProjectContext(workspaceId: string): Promise<string> {
   return context;
 }
 
+function normalizeUsage(usage: TokenUsageLike | undefined) {
+  const inputTokens = usage?.inputTokens ?? usage?.promptTokens ?? 0;
+  const outputTokens = usage?.outputTokens ?? usage?.completionTokens ?? 0;
+  const cacheHitTokens =
+    usage?.cacheHitTokens ?? usage?.cachedInputTokens ?? usage?.cacheReadInputTokens ?? 0;
+  return {
+    inputTokens: Math.max(0, inputTokens),
+    outputTokens: Math.max(0, outputTokens),
+    cacheHitTokens: Math.max(0, cacheHitTokens),
+  };
+}
+
 export async function POST(req: Request) {
   const { session, error: authError } = await requireAuth();
   if (authError) return authError;
@@ -85,11 +109,25 @@ export async function POST(req: Request) {
     return new Response("无权限", { status: 403 });
   }
 
+  const platformConfig = await getPlatformConfig().catch(() => null);
+  const chatReserve = platformConfig?.chatTokenReserve ?? 8_000;
+
+  let reservationId = "";
   try {
-    await ensureUserTokenQuota(session!.user.id, 1, "AI 对话");
-  } catch (quotaError) {
+    const reservation = await freezeTokenReservation({
+      userId: session!.user.id,
+      workspaceId,
+      source: "CHAT",
+      reservePoints: chatReserve,
+      description: "Freeze points for AI chat",
+      metadata: {
+        taskType,
+      },
+    });
+    reservationId = reservation.reservationId;
+  } catch (reserveError) {
     return new Response(
-      quotaError instanceof Error ? quotaError.message : "Token 额度不足",
+      reserveError instanceof Error ? reserveError.message : "Token 余额不足",
       { status: 402 }
     );
   }
@@ -123,43 +161,58 @@ export async function POST(req: Request) {
     });
   }
 
-  const result = streamText({
-    model,
-    system: systemPrompt,
-    messages,
-    async onFinish({ text, usage }) {
-      const durationMs = Date.now() - startTime;
-      const normalizedUsage = usage as {
-        inputTokens?: number;
-        outputTokens?: number;
-        promptTokens?: number;
-        completionTokens?: number;
-      };
-      const inputTokens =
-        normalizedUsage.inputTokens ?? normalizedUsage.promptTokens ?? 0;
-      const outputTokens =
-        normalizedUsage.outputTokens ?? normalizedUsage.completionTokens ?? 0;
+  try {
+    const result = streamText({
+      model,
+      system: systemPrompt,
+      messages,
+      async onFinish({ text, usage }) {
+        const durationMs = Date.now() - startTime;
+        const normalizedUsage = normalizeUsage(usage as TokenUsageLike);
 
-      await db.chatMessage.create({
-        data: {
-          workspaceId,
-          role: "ASSISTANT",
-          content: text,
-          metadata: { modelId, taskType },
-        },
-      });
+        await db.chatMessage.create({
+          data: {
+            workspaceId,
+            role: "ASSISTANT",
+            content: text,
+            metadata: { modelId, taskType },
+          },
+        });
 
-      await recordUsage({
-        userId: session!.user.id,
-        workspaceId,
-        taskType: taskType as AiTaskType,
-        modelId,
-        inputTokens,
-        outputTokens,
-        durationMs,
-      });
-    },
-  });
+        try {
+          await recordUsage({
+            userId: session!.user.id,
+            workspaceId,
+            taskType: taskType as AiTaskType,
+            modelId,
+            inputTokens: normalizedUsage.inputTokens,
+            outputTokens: normalizedUsage.outputTokens,
+            cacheHitTokens: normalizedUsage.cacheHitTokens,
+            durationMs,
+            reservationId,
+          });
+        } catch (settleError) {
+          await releaseTokenReservation({
+            reservationId,
+            reason:
+              settleError instanceof Error
+                ? settleError.message
+                : "Chat settlement failed",
+          }).catch(() => {});
+        }
+      },
+    });
 
-  return result.toTextStreamResponse();
+    return result.toTextStreamResponse();
+  } catch (chatError) {
+    await releaseTokenReservation({
+      reservationId,
+      reason: chatError instanceof Error ? chatError.message : "Chat start failed",
+    }).catch(() => {});
+
+    return new Response(
+      chatError instanceof Error ? chatError.message : "AI 对话失败",
+      { status: 500 }
+    );
+  }
 }

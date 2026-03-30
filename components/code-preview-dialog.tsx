@@ -74,6 +74,21 @@ export function CodePreviewDialog({
   const codeFiles = files.filter((f) => f.type === "CODE");
   const thesisFiles = files.filter((f) => f.type === "THESIS");
   const chartFiles = files.filter((f) => f.type === "CHART");
+  const classifyCodeFile = (filePath: string): "backend" | "frontend" | "sql" | "docs" | "other" => {
+    const path = filePath.toLowerCase();
+    if (path.endsWith(".sql") || path.includes("/sql/") || path.startsWith("sql/")) {
+      return "sql";
+    }
+    if (path.startsWith("backend/")) return "backend";
+    if (path.startsWith("frontend/")) return "frontend";
+    if (path.startsWith("docs/") || path.endsWith(".md")) return "docs";
+    return "other";
+  };
+  const backendCodeFiles = codeFiles.filter((f) => classifyCodeFile(f.path) === "backend");
+  const frontendCodeFiles = codeFiles.filter((f) => classifyCodeFile(f.path) === "frontend");
+  const sqlCodeFiles = codeFiles.filter((f) => classifyCodeFile(f.path) === "sql");
+  const docsCodeFiles = codeFiles.filter((f) => classifyCodeFile(f.path) === "docs");
+  const otherCodeFiles = codeFiles.filter((f) => classifyCodeFile(f.path) === "other");
 
   const loadFileContent = useCallback(
     async (fileId: string) => {
@@ -93,11 +108,27 @@ export function CodePreviewDialog({
 
   useEffect(() => {
     if (open && files.length > 0 && !selectedFileId) {
-      const first = codeFiles[0] || files[0];
+      const first =
+        backendCodeFiles[0] ||
+        frontendCodeFiles[0] ||
+        sqlCodeFiles[0] ||
+        docsCodeFiles[0] ||
+        otherCodeFiles[0] ||
+        files[0];
       setSelectedFileId(first.id);
       loadFileContent(first.id);
     }
-  }, [open, files, selectedFileId, codeFiles, loadFileContent]);
+  }, [
+    open,
+    files,
+    selectedFileId,
+    backendCodeFiles,
+    frontendCodeFiles,
+    sqlCodeFiles,
+    docsCodeFiles,
+    otherCodeFiles,
+    loadFileContent,
+  ]);
 
   useEffect(() => {
     if (!open) {
@@ -215,7 +246,11 @@ export function CodePreviewDialog({
         {activeTab === "files" ? (
           <div className="flex flex-1 min-h-0">
             <div className="w-56 border-r shrink-0 overflow-y-auto p-2">
-              {renderFileGroup("源代码", codeFiles, Code)}
+              {renderFileGroup("后端文件", backendCodeFiles, Code)}
+              {renderFileGroup("前端文件", frontendCodeFiles, Code)}
+              {renderFileGroup("SQL 脚本", sqlCodeFiles, Code)}
+              {renderFileGroup("文档说明", docsCodeFiles, FileText)}
+              {renderFileGroup("其他代码", otherCodeFiles, Code)}
               {renderFileGroup("论文", thesisFiles, FileText)}
               {renderFileGroup("图表", chartFiles, FileText)}
             </div>

@@ -1,6 +1,6 @@
 import { requireAdmin } from "@/lib/auth-helpers";
 import { success, error } from "@/lib/api-response";
-import { builtinModelIds } from "@/lib/ai/providers";
+import { builtinModelDefinitions, builtinModelIds } from "@/lib/ai/providers";
 import {
   getPlatformConfig,
   savePlatformConfig,
@@ -43,6 +43,13 @@ export async function GET() {
   return success({
     modelOptions: modelOptions.map((item) => item.id),
     modelOptionDetails: modelOptions,
+    builtinPricing: builtinModelDefinitions.map((item) => ({
+      id: item.id,
+      name: item.name,
+      inputCostPerMToken: item.inputCostPerMToken,
+      outputCostPerMToken: item.outputCostPerMToken,
+      cacheHitCostPerMToken: item.cacheHitCostPerMToken,
+    })),
     config: {
       codeGenModelId: platformConfig.codeGenModelId,
       thesisGenModelId: platformConfig.thesisGenModelId,
@@ -88,6 +95,10 @@ export async function PATCH(req: Request) {
           value.outputCostPerMToken === undefined
             ? undefined
             : Number(value.outputCostPerMToken),
+        cacheHitCostPerMToken:
+          value.cacheHitCostPerMToken === undefined
+            ? undefined
+            : Number(value.cacheHitCostPerMToken),
         enabled:
           value.enabled === undefined ? true : Boolean(value.enabled),
       });
@@ -219,6 +230,13 @@ export async function PATCH(req: Request) {
   return success({
     modelOptions: nextModelOptions.map((item) => item.id),
     modelOptionDetails: nextModelOptions,
+    builtinPricing: builtinModelDefinitions.map((item) => ({
+      id: item.id,
+      name: item.name,
+      inputCostPerMToken: item.inputCostPerMToken,
+      outputCostPerMToken: item.outputCostPerMToken,
+      cacheHitCostPerMToken: item.cacheHitCostPerMToken,
+    })),
     config: {
       codeGenModelId: nextPlatform.codeGenModelId,
       thesisGenModelId: nextPlatform.thesisGenModelId,

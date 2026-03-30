@@ -2,12 +2,12 @@ import { success, error } from "@/lib/api-response";
 import { requireAuth } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { taskQueue } from "@/lib/queue";
-import { ensureUserTokenQuota } from "@/lib/ai/usage";
 import {
   ensureUserTaskConcurrencyAllowed,
   getQueueAttemptsFromRetryLimit,
 } from "@/lib/risk-control";
 import { getPlatformConfig } from "@/lib/system-config";
+import { freezeTokenReservation } from "@/lib/billing/token-wallet";
 
 type WorkspaceRequirements = {
   previewConfirmed?: boolean;
@@ -85,26 +85,47 @@ export async function POST(
     );
   }
 
+  const reservePoints = platformConfig?.thesisGenTokenReserve ?? 220_000;
+  let jobId = "";
+  let reservationId = "";
   try {
-    await ensureUserTokenQuota(
-      userId,
-      platformConfig?.thesisGenTokenReserve ?? 220_000,
-      "论文生成"
-    );
+    const txResult = await db.$transaction(async (tx) => {
+      const job = await tx.taskJob.create({
+        data: {
+          workspaceId: id,
+          type: "THESIS_GEN",
+          status: "PENDING",
+        },
+      });
+
+      const reservation = await freezeTokenReservation(
+        {
+          userId,
+          workspaceId: id,
+          taskJobId: job.id,
+          source: "THESIS_GEN",
+          reservePoints,
+          description: "Freeze points for thesis generation",
+        },
+        tx
+      );
+
+      return {
+        jobId: job.id,
+        reservationId: reservation.reservationId,
+      };
+    });
+
+    jobId = txResult.jobId;
+    reservationId = txResult.reservationId;
   } catch (quotaError) {
     return error(
-      quotaError instanceof Error ? quotaError.message : "Token 额度不足",
+      quotaError instanceof Error
+        ? quotaError.message
+        : "Token 余额不足，无法启动论文生成",
       402
     );
   }
-
-  const job = await db.taskJob.create({
-    data: {
-      workspaceId: id,
-      type: "THESIS_GEN",
-      status: "PENDING",
-    },
-  });
 
   const attempts = getQueueAttemptsFromRetryLimit(
     platformConfig?.taskFailureRetryLimit ?? 2
@@ -113,11 +134,12 @@ export async function POST(
   await taskQueue.add(
     "thesis-gen",
     {
-      jobId: job.id,
+      jobId,
       workspaceId: id,
       userId,
       modelId: platformConfig?.thesisGenModelId,
       singleTaskTokenHardLimit: platformConfig?.singleTaskTokenHardLimit,
+      reservationId,
     },
     {
       attempts,
@@ -127,12 +149,15 @@ export async function POST(
 
   return success(
     {
-      jobId: job.id,
+      jobId,
       message: "论文生成任务已提交",
       riskControl: {
         retryLimit: Math.max(0, attempts - 1),
         singleTaskTokenHardLimit:
           platformConfig?.singleTaskTokenHardLimit ?? 240_000,
+      },
+      billing: {
+        reservedPoints: reservePoints,
       },
     },
     202

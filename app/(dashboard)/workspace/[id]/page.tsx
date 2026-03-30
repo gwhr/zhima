@@ -95,6 +95,14 @@ interface Job {
   createdAt: string;
 }
 
+interface TokenSummary {
+  tokenBudget: number;
+  tokenUsed: number;
+  tokenRemaining: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
 const statusMap: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
   DRAFT: { label: "草稿", variant: "secondary" },
   GENERATING: { label: "生成中", variant: "default" },
@@ -134,21 +142,24 @@ export default function WorkspaceDetailPage() {
   const [previewMsg, setPreviewMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [showGuide, setShowGuide] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [tokenSummary, setTokenSummary] = useState<TokenSummary | null>(null);
   const templateInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadData = useCallback(async () => {
-    const [wsRes, filesRes, jobsRes] = await Promise.all([
+    const [wsRes, filesRes, jobsRes, tokenRes] = await Promise.all([
       fetch(`/api/workspace/${params.id}`),
       fetch(`/api/workspace/${params.id}/files`),
       fetch(`/api/workspace/${params.id}/jobs`),
+      fetch("/api/billing/tokens"),
     ]);
-    const [wsData, filesData, jobsData] = await Promise.all([
-      wsRes.json(), filesRes.json(), jobsRes.json(),
+    const [wsData, filesData, jobsData, tokenData] = await Promise.all([
+      wsRes.json(), filesRes.json(), jobsRes.json(), tokenRes.json(),
     ]);
 
     if (wsData.success) setWorkspace(wsData.data);
     if (filesData.success) setFiles(filesData.data);
     if (jobsData.success) setJobs(jobsData.data);
+    if (tokenData.success) setTokenSummary(tokenData.data);
     setLoading(false);
   }, [params.id]);
 
@@ -312,8 +323,17 @@ export default function WorkspaceDetailPage() {
     jobs.some((j) => j.type === "CODE_GEN" && (j.status === "PENDING" || j.status === "RUNNING"));
   const hasRunningJob = jobs.some((j) => j.status === "PENDING" || j.status === "RUNNING");
   const operationLocked = generating !== null || hasRunningJob;
+  const canGenerateCode = featureConfirmed && !operationLocked && !hasCodeFiles;
   const canGenerateThesis =
     hasCodeFiles && previewConfirmed && !isCodeGenerating && !operationLocked;
+  const tokenUsagePercent = tokenSummary
+    ? Math.min(
+        100,
+        tokenSummary.tokenBudget > 0
+          ? (tokenSummary.tokenUsed / tokenSummary.tokenBudget) * 100
+          : 0
+      )
+    : 0;
 
   const colorMap: Record<string, { bg: string; text: string; progressBg: string }> = {
     blue:   { bg: "bg-blue-100",   text: "text-blue-600",   progressBg: "bg-blue-500" },
@@ -354,8 +374,13 @@ export default function WorkspaceDetailPage() {
     const modelText =
       typeof jobResult.model === "string" ? jobResult.model : "";
     const isRunning = job?.status === "RUNNING" || job?.status === "PENDING";
+    const isPending = job?.status === "PENDING";
     const isCompleted = job?.status === "COMPLETED";
     const isFailed = job?.status === "FAILED";
+    const pendingTooLong =
+      !!job &&
+      isPending &&
+      Date.now() - new Date(job.createdAt).getTime() > 30_000;
 
     return (
       <div className={`rounded-lg border p-3 transition-colors ${disabled ? "opacity-60" : "hover:bg-muted/30"} ${isRunning ? "border-blue-300 bg-blue-50/50 ring-1 ring-blue-200" : ""} ${isCompleted ? "border-green-300 bg-green-50/30" : ""} ${isFailed ? "border-red-300 bg-red-50/30" : ""}`}>
@@ -392,6 +417,11 @@ export default function WorkspaceDetailPage() {
                 </div>
                 {isRunning && detailText && (
                   <p className="text-[11px] text-muted-foreground">{detailText}</p>
+                )}
+                {pendingTooLong && (
+                  <p className="text-[11px] text-amber-600">
+                    任务排队时间较长，请确认后台 Worker 已启动（开发环境可执行 `pnpm worker:dev`）。
+                  </p>
                 )}
                 {modelText && (
                   <p className="text-[11px] text-muted-foreground">模型: {modelText}</p>
@@ -650,21 +680,23 @@ export default function WorkspaceDetailPage() {
                 step: 1,
                 color: "blue",
                 title: "生成项目代码",
-                desc: "根据功能模块和技术栈，自动生成完整的项目源代码",
+                desc: "根据功能模块和技术栈生成代码草稿与示例工程，便于你继续完善",
                 jobType: "CODE_GEN",
                 action: (
                   <Button
                     size="sm"
                     onClick={() => triggerGenerate("code")}
-                    disabled={operationLocked || !featureConfirmed}
+                    disabled={!canGenerateCode}
                     className="shrink-0"
                   >
-                    {generating === "code" ? (
+                    {hasCodeFiles ? (
+                      <CheckCircle2 className="mr-1.5 h-3 w-3" />
+                    ) : generating === "code" ? (
                       <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
                     ) : (
                       <Code className="mr-1.5 h-3 w-3" />
                     )}
-                    生成代码
+                    {hasCodeFiles ? "已生成" : "生成代码"}
                   </Button>
                 ),
               })}
@@ -673,7 +705,7 @@ export default function WorkspaceDetailPage() {
                 step: 2,
                 color: "green",
                 title: "生成毕业论文",
-                desc: "一键生成完整论文：封面、目录、ER图、架构图、用例图、数据库表格、参考文献、致谢全部自动嵌入",
+                desc: "生成论文结构化初稿（含封面、目录、图表与参考内容），供你按规范修改完善",
                 jobType: "THESIS_GEN",
                 action: (
                   <Button
@@ -697,7 +729,7 @@ export default function WorkspaceDetailPage() {
                 step: 3,
                 color: "amber",
                 title: "预览代码 & 下载",
-                desc: "查看所有生成的文件内容，或一键打包下载",
+                desc: "查看当前阶段输出文件，并按需打包下载",
                 jobType: "PREVIEW",
                 disabled: files.length === 0 || isCodeGenerating,
                 action: (
@@ -768,26 +800,49 @@ export default function WorkspaceDetailPage() {
                 </div>
               )}
 
-              <div className="flex items-center gap-2 rounded-md bg-blue-50 px-3 py-2 text-xs text-blue-600">
-                <Info className="h-3.5 w-3.5 shrink-0" />
-                有任何问题可以在下方 AI 对话中随时提问，AI 会根据你的项目进行解答
-              </div>
+              {hasCodeFiles ? (
+                <div className="flex items-center gap-2 rounded-md bg-blue-50 px-3 py-2 text-xs text-blue-600">
+                  <Info className="h-3.5 w-3.5 shrink-0" />
+                  有任何问题可以在下方 AI 对话中随时提问，AI 会根据你的项目进行解答
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+                  <Info className="h-3.5 w-3.5 shrink-0" />
+                  生成项目代码后将解锁 AI 对话，你可以基于生成结果继续讨论与修改。
+                </div>
+              )}
             </CardContent>
           </Card>
 
           {/* Chat */}
-          <Card className="h-[480px] flex flex-col border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">AI 对话</CardTitle>
-            </CardHeader>
-            <CardContent className="flex-1 overflow-hidden p-0">
-              <ChatPanel
-                workspaceId={workspace.id}
-                files={files}
-                onFileApplied={loadData}
-              />
-            </CardContent>
-          </Card>
+          {hasCodeFiles ? (
+            <Card className="h-[480px] flex flex-col border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">AI 对话</CardTitle>
+              </CardHeader>
+              <CardContent className="flex-1 overflow-hidden p-0">
+                <ChatPanel
+                  workspaceId={workspace.id}
+                  files={files}
+                  onFileApplied={loadData}
+                />
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="h-[220px] border-dashed border-white/70 bg-white/70 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">AI 对话（待解锁）</CardTitle>
+              </CardHeader>
+              <CardContent className="h-full flex items-center justify-center">
+                <div className="max-w-md text-center space-y-2">
+                  <MessageCircle className="h-8 w-8 mx-auto text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">
+                    先完成“生成项目代码”，再在这里让 AI 帮你讨论细节、修改功能和调整实现。
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* Right sidebar */}
@@ -810,6 +865,20 @@ export default function WorkspaceDetailPage() {
                 const hasThesis = thesisFiles.length > 0;
                 const hasChart = chartFiles.length > 0;
                 const hasAny = hasCode || hasThesis || hasChart;
+                const backendCodeCount = codeFiles.filter((f) =>
+                  f.path.toLowerCase().startsWith("backend/")
+                ).length;
+                const frontendCodeCount = codeFiles.filter((f) =>
+                  f.path.toLowerCase().startsWith("frontend/")
+                ).length;
+                const sqlCodeCount = codeFiles.filter((f) => {
+                  const path = f.path.toLowerCase();
+                  return path.endsWith(".sql") || path.includes("/sql/");
+                }).length;
+                const otherCodeCount = Math.max(
+                  0,
+                  codeFiles.length - backendCodeCount - frontendCodeCount - sqlCodeCount
+                );
 
                 return (
                   <div className="space-y-2.5">
@@ -822,12 +891,24 @@ export default function WorkspaceDetailPage() {
                         <p className="text-xs text-muted-foreground">
                           {hasCode ? `${codeFiles.length} 个文件` : "尚未生成"}
                         </p>
+                        {hasCode && (
+                          <p className="text-[11px] text-muted-foreground mt-0.5">
+                            后端 {backendCodeCount} · 前端 {frontendCodeCount} · SQL {sqlCodeCount}
+                            {otherCodeCount > 0 ? ` · 其他 ${otherCodeCount}` : ""}
+                          </p>
+                        )}
                       </div>
                       <Button size="sm" variant={hasCode ? "default" : "outline"} disabled={!hasCode} className="shrink-0" onClick={() => downloadFiles("code")}>
                         <Download className="mr-1 h-3 w-3" />
                         下载
                       </Button>
                     </div>
+
+                    {hasCode && (
+                      <div className="rounded-md bg-blue-50 px-3 py-2 text-[11px] text-blue-700">
+                        代码下载包包含当前工作空间的全部代码文件；预览仅用于查看内容，不会影响下载范围。
+                      </div>
+                    )}
 
                     <div className={`flex items-center gap-3 rounded-lg border p-3 ${hasThesis ? "bg-green-50/50 border-green-200" : "bg-muted/30"}`}>
                       <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${hasThesis ? "bg-green-100" : "bg-gray-100"}`}>
@@ -935,6 +1016,36 @@ export default function WorkspaceDetailPage() {
                   </div>
                 );
               })()}
+            </CardContent>
+          </Card>
+
+          <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Token 用量</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">展示当前账号总额度与已使用进度</p>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">已使用</span>
+                <span className="font-medium">
+                  {(tokenSummary?.tokenUsed ?? 0).toLocaleString()} / {(tokenSummary?.tokenBudget ?? 0).toLocaleString()}
+                </span>
+              </div>
+              <Progress value={tokenUsagePercent} className="h-2" />
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-md bg-muted/40 py-2">
+                  <p className="text-xs text-muted-foreground">总量</p>
+                  <p className="text-sm font-medium">{(tokenSummary?.tokenBudget ?? 0).toLocaleString()}</p>
+                </div>
+                <div className="rounded-md bg-muted/40 py-2">
+                  <p className="text-xs text-muted-foreground">已用</p>
+                  <p className="text-sm font-medium">{(tokenSummary?.tokenUsed ?? 0).toLocaleString()}</p>
+                </div>
+                <div className="rounded-md bg-muted/40 py-2">
+                  <p className="text-xs text-muted-foreground">剩余</p>
+                  <p className="text-sm font-medium">{(tokenSummary?.tokenRemaining ?? 0).toLocaleString()}</p>
+                </div>
+              </div>
             </CardContent>
           </Card>
 
@@ -1124,8 +1235,8 @@ npm run dev
                 遇到问题？
               </h3>
               <p className="text-xs text-amber-600">
-                如果本地部署遇到困难，可以联系客服提供<strong>远程部署服务</strong>，我们帮你把项目跑起来。
-                也可以在工作空间的 AI 对话中描述你的报错信息，AI 会帮你排查。
+                如果本地部署遇到困难，可以联系客服提供<strong>远程部署服务</strong>，协助你完成环境部署。
+                也可以在工作空间的 AI 对话中描述你的报错信息，AI 会辅助你定位问题。
               </p>
             </div>
           </div>

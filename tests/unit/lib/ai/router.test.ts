@@ -1,16 +1,17 @@
 import { AiTaskType } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { findUniqueMock } = vi.hoisted(() => ({
-  findUniqueMock: vi.fn(),
+const { getPlatformConfigMock, getRuntimeModelMock } = vi.hoisted(() => ({
+  getPlatformConfigMock: vi.fn(),
+  getRuntimeModelMock: vi.fn(),
 }));
 
-vi.mock("@/lib/db", () => ({
-  db: {
-    userQuota: {
-      findUnique: findUniqueMock,
-    },
-  },
+vi.mock("@/lib/system-config", () => ({
+  getPlatformConfig: getPlatformConfigMock,
+}));
+
+vi.mock("@/lib/ai/runtime-model", () => ({
+  getRuntimeModel: getRuntimeModelMock,
 }));
 
 import { getQuotaStage, selectModel } from "@/lib/ai/router";
@@ -29,50 +30,51 @@ describe("getQuotaStage", () => {
 
 describe("selectModel", () => {
   beforeEach(() => {
-    findUniqueMock.mockReset();
+    getPlatformConfigMock.mockReset();
+    getRuntimeModelMock.mockReset();
+    getRuntimeModelMock.mockImplementation(async (id: string) => ({ id }));
   });
 
-  it("uses glm when quota is missing", async () => {
-    findUniqueMock.mockResolvedValue(null);
-
-    const result = await selectModel("u1", "w1", AiTaskType.MODIFY_SIMPLE);
-
-    expect(result.modelId).toBe("glm");
-    expect(result.stage).toBe("normal");
-  });
-
-  it("uses opus for CODE_GEN in tightened stage", async () => {
-    findUniqueMock.mockResolvedValue({
-      opusUsed: 70,
-      opusBudget: 100,
+  it("uses configured code model for code-related tasks", async () => {
+    getPlatformConfigMock.mockResolvedValue({
+      codeGenModelId: "glm-4-flash",
+      thesisGenModelId: "mimo-v2-pro",
     });
 
     const result = await selectModel("u1", "w1", AiTaskType.CODE_GEN);
 
-    expect(result.modelId).toBe("opus");
-    expect(result.stage).toBe("tightened");
+    expect(getRuntimeModelMock).toHaveBeenCalledWith("glm-4-flash");
+    expect(result.modelId).toBe("glm-4-flash");
+    expect(result.stage).toBe("configured");
   });
 
-  it("falls back to glm for economy stage", async () => {
-    findUniqueMock.mockResolvedValue({
-      opusUsed: 95,
-      opusBudget: 100,
+  it("uses configured thesis model for thesis/chart tasks", async () => {
+    getPlatformConfigMock.mockResolvedValue({
+      codeGenModelId: "glm-4-flash",
+      thesisGenModelId: "mimo-v2-pro",
     });
 
-    const result = await selectModel("u1", "w1", AiTaskType.CHART);
+    const thesisResult = await selectModel("u1", "w1", AiTaskType.THESIS);
+    const chartResult = await selectModel("u1", "w1", AiTaskType.CHART);
 
-    expect(result.modelId).toBe("glm");
-    expect(result.stage).toBe("economy");
+    expect(thesisResult.modelId).toBe("mimo-v2-pro");
+    expect(chartResult.modelId).toBe("mimo-v2-pro");
   });
 
-  it("throws when quota exceeded", async () => {
-    findUniqueMock.mockResolvedValue({
-      opusUsed: 100,
-      opusBudget: 100,
+  it("falls back to deepseek when configured model fails", async () => {
+    getPlatformConfigMock.mockResolvedValue({
+      codeGenModelId: "broken-model",
+      thesisGenModelId: "mimo-v2-pro",
     });
+    getRuntimeModelMock
+      .mockRejectedValueOnce(new Error("bad model"))
+      .mockResolvedValueOnce({ id: "deepseek" });
 
-    await expect(
-      selectModel("u1", "w1", AiTaskType.CODE_GEN)
-    ).rejects.toThrow("额度已用完");
+    const result = await selectModel("u1", "w1", AiTaskType.MODIFY_SIMPLE);
+
+    expect(getRuntimeModelMock).toHaveBeenNthCalledWith(1, "broken-model");
+    expect(getRuntimeModelMock).toHaveBeenNthCalledWith(2, "deepseek");
+    expect(result.modelId).toBe("deepseek");
+    expect(result.stage).toBe("fallback");
   });
 });

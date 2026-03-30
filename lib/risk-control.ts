@@ -3,6 +3,10 @@ import type { JobStatus } from "@prisma/client";
 
 const ACTIVE_JOB_STATUSES: JobStatus[] = ["PENDING", "RUNNING"];
 
+// 清理“排队/运行过久未更新”的僵尸任务，避免把用户并发额度永久占满。
+const STALE_PENDING_MINUTES = 10;
+const STALE_RUNNING_MINUTES = 120;
+
 function normalizePositiveInt(
   value: number | null | undefined,
   fallback: number,
@@ -12,6 +16,45 @@ function normalizePositiveInt(
     return fallback;
   }
   return Math.min(max, Math.floor(value!));
+}
+
+function getStaleBefore(minutes: number) {
+  return new Date(Date.now() - minutes * 60 * 1000);
+}
+
+async function cleanupStaleActiveJobsForUser(userId: string) {
+  const stalePendingBefore = getStaleBefore(STALE_PENDING_MINUTES);
+  const staleRunningBefore = getStaleBefore(STALE_RUNNING_MINUTES);
+
+  const [pendingCleanup, runningCleanup] = await Promise.all([
+    db.taskJob.updateMany({
+      where: {
+        status: "PENDING",
+        updatedAt: { lt: stalePendingBefore },
+        workspace: { userId },
+      },
+      data: {
+        status: "FAILED",
+        error: "任务排队超时，系统已自动释放并发额度，请重试。",
+      },
+    }),
+    db.taskJob.updateMany({
+      where: {
+        status: "RUNNING",
+        updatedAt: { lt: staleRunningBefore },
+        workspace: { userId },
+      },
+      data: {
+        status: "FAILED",
+        error: "任务执行超时，系统已自动释放并发额度，请重试。",
+      },
+    }),
+  ]);
+
+  return {
+    cleanedPending: pendingCleanup.count,
+    cleanedRunning: runningCleanup.count,
+  };
 }
 
 export function getQueueAttemptsFromRetryLimit(retryLimit: number): number {
@@ -47,6 +90,8 @@ export async function ensureUserTaskConcurrencyAllowed(
     userId,
     defaultLimit
   );
+
+  await cleanupStaleActiveJobsForUser(userId);
 
   const activeCount = await db.taskJob.count({
     where: {
