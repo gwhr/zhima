@@ -7,6 +7,7 @@ export interface PlatformConfig {
   codeGenModelId: string;
   thesisGenModelId: string;
   defaultUserTokenBudget: number;
+  freeWorkspaceLimit: number;
   codeGenTokenReserve: number;
   thesisGenTokenReserve: number;
   chatTokenReserve: number;
@@ -19,8 +20,13 @@ export interface PlatformConfig {
   enableCodeGeneration: boolean;
   enableThesisGeneration: boolean;
   enablePreviewBuild: boolean;
+  requireRechargeForDownload: boolean;
   maintenanceNoticeEnabled: boolean;
   maintenanceNoticeText: string;
+  supportContactEnabled: boolean;
+  supportContactTitle: string;
+  supportContactDescription: string;
+  supportContactQrUrl: string;
 }
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
@@ -50,6 +56,10 @@ export function getDefaultPlatformConfigFromEnv(): PlatformConfig {
     defaultUserTokenBudget: parsePositiveInt(
       process.env.DEFAULT_USER_TOKEN_BUDGET,
       500_000
+    ),
+    freeWorkspaceLimit: parseNonNegativeInt(
+      process.env.FREE_USER_WORKSPACE_LIMIT,
+      3
     ),
     codeGenTokenReserve: parsePositiveInt(
       process.env.CODE_GEN_TOKEN_RESERVE,
@@ -90,11 +100,25 @@ export function getDefaultPlatformConfigFromEnv(): PlatformConfig {
       true
     ),
     enablePreviewBuild: parseBoolean(process.env.ENABLE_PREVIEW_BUILD, true),
+    requireRechargeForDownload: parseBoolean(
+      process.env.REQUIRE_RECHARGE_FOR_DOWNLOAD,
+      true
+    ),
     maintenanceNoticeEnabled: parseBoolean(
       process.env.MAINTENANCE_NOTICE_ENABLED,
       false
     ),
     maintenanceNoticeText: process.env.MAINTENANCE_NOTICE_TEXT || "",
+    supportContactEnabled: parseBoolean(
+      process.env.SUPPORT_CONTACT_ENABLED,
+      false
+    ),
+    supportContactTitle:
+      process.env.SUPPORT_CONTACT_TITLE || "一对一辅导（人工）",
+    supportContactDescription:
+      process.env.SUPPORT_CONTACT_DESCRIPTION ||
+      "可联系客服获取选题把关、部署排错、答辩材料梳理等一对一支持。",
+    supportContactQrUrl: process.env.SUPPORT_CONTACT_QR_URL || "",
   };
 }
 
@@ -110,6 +134,10 @@ function normalizeConfig(
     defaultUserTokenBudget: Math.max(
       1,
       Number(input.defaultUserTokenBudget ?? defaults.defaultUserTokenBudget)
+    ),
+    freeWorkspaceLimit: Math.max(
+      0,
+      Number(input.freeWorkspaceLimit ?? defaults.freeWorkspaceLimit)
     ),
     codeGenTokenReserve: Math.max(
       1,
@@ -163,6 +191,18 @@ function normalizeConfig(
       typeof input.maintenanceNoticeText === "string"
         ? input.maintenanceNoticeText
         : defaults.maintenanceNoticeText,
+    supportContactTitle:
+      typeof input.supportContactTitle === "string"
+        ? input.supportContactTitle
+        : defaults.supportContactTitle,
+    supportContactDescription:
+      typeof input.supportContactDescription === "string"
+        ? input.supportContactDescription
+        : defaults.supportContactDescription,
+    supportContactQrUrl:
+      typeof input.supportContactQrUrl === "string"
+        ? input.supportContactQrUrl
+        : defaults.supportContactQrUrl,
   };
 }
 

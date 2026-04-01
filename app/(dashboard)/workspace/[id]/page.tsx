@@ -78,6 +78,16 @@ interface WorkspaceDetail {
   _count: { chatMessages: number; files: number; taskJobs: number };
 }
 
+interface WorkspacePlatformPolicy {
+  freeWorkspaceLimit: number;
+  requireRechargeForDownload: boolean;
+  supportContactEnabled: boolean;
+  supportContactTitle: string;
+  supportContactDescription: string;
+  supportContactQrUrl: string;
+  hasRecharged: boolean;
+}
+
 interface FileItem {
   id: string;
   path: string;
@@ -124,10 +134,41 @@ const fileTypeIcons: Record<string, typeof Code> = {
   CONFIG: Settings,
 };
 
+const jobStageHints: Record<string, string[]> = {
+  CODE_GEN: [
+    "正在分析需求并构建代码生成提示词",
+    "正在规划项目目录结构",
+    "正在生成后端核心模块",
+    "正在生成前端页面与交互",
+    "正在整理配置与运行说明",
+  ],
+  THESIS_GEN: [
+    "正在整理论文大纲",
+    "正在生成摘要与绪论",
+    "正在完善各章节正文",
+    "正在补充图表与参考内容",
+    "正在进行排版与导出",
+  ],
+  PREVIEW: [
+    "正在读取项目文件",
+    "正在构建目录树与分类",
+    "正在渲染预览页面",
+  ],
+};
+
+function formatElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const min = Math.floor(seconds / 60);
+  const sec = seconds % 60;
+  return `${min}m ${sec}s`;
+}
+
 export default function WorkspaceDetailPage() {
   const params = useParams();
   const router = useRouter();
   const [workspace, setWorkspace] = useState<WorkspaceDetail | null>(null);
+  const [platformPolicy, setPlatformPolicy] =
+    useState<WorkspacePlatformPolicy | null>(null);
   const [files, setFiles] = useState<FileItem[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
@@ -143,10 +184,21 @@ export default function WorkspaceDetailPage() {
   const [showGuide, setShowGuide] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [tokenSummary, setTokenSummary] = useState<TokenSummary | null>(null);
+  const [downloadingType, setDownloadingType] = useState<
+    "code" | "thesis" | "chart" | "all" | null
+  >(null);
+  const [downloadMsg, setDownloadMsg] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const templateInputRef = useRef<HTMLInputElement | null>(null);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const loadData = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const [wsRes, filesRes, jobsRes, tokenRes] = await Promise.all([
         fetch(`/api/workspace/${params.id}`),
@@ -170,28 +222,50 @@ export default function WorkspaceDetailPage() {
         parseJsonSafe(tokenRes),
       ]);
 
-      if (wsData?.success) setWorkspace(wsData.data);
+      if (wsData?.success) {
+        const payload = wsData.data ?? {};
+        if (payload.workspace) {
+          setWorkspace(payload.workspace as WorkspaceDetail);
+          setPlatformPolicy(
+            (payload.platformPolicy as WorkspacePlatformPolicy) || null
+          );
+        } else {
+          setWorkspace(payload as WorkspaceDetail);
+          setPlatformPolicy(null);
+        }
+      }
       if (filesData?.success) setFiles(filesData.data);
       if (jobsData?.success) setJobs(jobsData.data);
       if (tokenData?.success) setTokenSummary(tokenData.data);
     } catch (err) {
       console.error("Failed to load workspace detail:", err);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [params.id]);
 
   useEffect(() => {
-    loadData();
+    void loadData();
   }, [loadData]);
 
   useEffect(() => {
     const hasRunning = jobs.some((j) => j.status === "PENDING" || j.status === "RUNNING");
     if (!hasRunning) return;
 
-    const interval = setInterval(loadData, 5000);
+    const interval = setInterval(() => {
+      void loadData({ silent: true });
+    }, 5000);
     return () => clearInterval(interval);
   }, [jobs, loadData]);
+
+  useEffect(() => {
+    const hasRunning = jobs.some((j) => j.status === "PENDING" || j.status === "RUNNING");
+    if (!hasRunning) return;
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [jobs]);
 
   async function triggerGenerate(type: "code" | "thesis") {
     setGenerating(type);
@@ -200,18 +274,47 @@ export default function WorkspaceDetailPage() {
       thesis: "generate-thesis",
     };
     await fetch(`/api/workspace/${params.id}/${endpoints[type]}`, { method: "POST" });
-    await loadData();
+    await loadData({ silent: true });
     setGenerating(null);
   }
 
-  function downloadFiles(type: "code" | "thesis" | "chart" | "all") {
-    const url = `/api/workspace/${params.id}/download?type=${type}`;
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+  async function downloadFiles(type: "code" | "thesis" | "chart" | "all") {
+    setDownloadingType(type);
+    setDownloadMsg(null);
+    try {
+      const response = await fetch(`/api/workspace/${params.id}/download?type=${type}`);
+      const contentType = response.headers.get("content-type") || "";
+      if (!response.ok) {
+        const errorData = contentType.includes("application/json")
+          ? await response.json().catch(() => null)
+          : null;
+        throw new Error(errorData?.error || "下载失败，请稍后重试");
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") || "";
+      const filenameMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+      const fallbackFilename = `${workspace?.name || "workspace"}-${type}.zip`;
+      const filename = filenameMatch
+        ? decodeURIComponent(filenameMatch[1])
+        : fallbackFilename;
+
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(objectUrl);
+      setDownloadMsg({ type: "success", text: "下载已开始，请查看浏览器下载列表。" });
+    } catch (downloadError) {
+      const message =
+        downloadError instanceof Error ? downloadError.message : "下载失败，请稍后重试";
+      setDownloadMsg({ type: "error", text: message });
+    } finally {
+      setDownloadingType(null);
+    }
   }
 
   async function uploadTemplate(file: File) {
@@ -236,7 +339,7 @@ export default function WorkspaceDetailPage() {
         type: "success",
         text: `模板上传成功：${file.name}`,
       });
-      await loadData();
+      await loadData({ silent: true });
     } catch (err) {
       setTemplateUploadMsg({
         type: "error",
@@ -271,7 +374,7 @@ export default function WorkspaceDetailPage() {
       });
       setReviseDialogOpen(false);
       setReviseIdea("");
-      await loadData();
+      await loadData({ silent: true });
     } catch (err) {
       setConfirmMsg({
         type: "error",
@@ -294,7 +397,7 @@ export default function WorkspaceDetailPage() {
         throw new Error(data.error || "预览确认失败");
       }
       setPreviewMsg({ type: "success", text: "预览已确认，可以生成论文了" });
-      await loadData();
+      await loadData({ silent: true });
     } catch (err) {
       setPreviewMsg({
         type: "error",
@@ -344,6 +447,17 @@ export default function WorkspaceDetailPage() {
   const canGenerateCode = featureConfirmed && !operationLocked && !hasCodeFiles;
   const canGenerateThesis =
     hasCodeFiles && previewConfirmed && !isCodeGenerating && !operationLocked;
+  const runningCodeJob = jobs.find(
+    (j) => j.type === "CODE_GEN" && (j.status === "PENDING" || j.status === "RUNNING")
+  );
+  const runningCodeElapsedSeconds = runningCodeJob
+    ? Math.max(0, Math.floor((nowMs - new Date(runningCodeJob.createdAt).getTime()) / 1000))
+    : 0;
+  const waitingCodeHint = runningCodeJob
+    ? `步骤1进行中（${runningCodeJob.progress}% · 已运行 ${formatElapsed(
+        runningCodeElapsedSeconds
+      )}），完成后会自动解锁。`
+    : "等待步骤1生成代码后解锁。";
   const tokenUsagePercent = tokenSummary
     ? Math.min(
         100,
@@ -352,6 +466,93 @@ export default function WorkspaceDetailPage() {
           : 0
       )
     : 0;
+  const showSupportCard =
+    (platformPolicy?.supportContactEnabled ?? false) &&
+    (platformPolicy?.supportContactTitle ||
+      platformPolicy?.supportContactDescription ||
+      platformPolicy?.supportContactQrUrl);
+  const downloadNeedRecharge =
+    (platformPolicy?.requireRechargeForDownload ?? false) &&
+    !(platformPolicy?.hasRecharged ?? false);
+  const backendStack = (workspace.techStack.backend || "").toLowerCase();
+  const isJavaBackend = backendStack.includes("java");
+  const isNodeBackend = backendStack.includes("node");
+  const isPythonBackend = backendStack.includes("python");
+  const isFlaskBackend = backendStack.includes("flask");
+  const isDjangoBackend = backendStack.includes("django");
+  const isFastapiBackend = backendStack.includes("fastapi");
+
+  const backendRunGuide = isJavaBackend
+    ? `# 进入后端目录
+cd backend
+
+# 按实际情况修改数据库连接配置
+# src/main/resources/application.yml
+
+# 初始化数据库（如有 SQL）
+mysql -u root -p your_database < sql/init.sql
+
+# 启动后端
+mvn spring-boot:run`
+    : isNodeBackend
+      ? `# 进入后端目录
+cd backend
+
+# 安装依赖
+npm install
+
+# 按实际情况修改 .env
+
+# 启动后端
+npm run dev`
+      : isDjangoBackend
+        ? `# 进入后端目录
+cd backend
+
+# 创建虚拟环境并激活
+python -m venv .venv
+# Windows: .venv\\Scripts\\activate
+# macOS/Linux: source .venv/bin/activate
+
+# 安装依赖
+pip install -r requirements.txt
+
+# 执行迁移并启动
+python manage.py migrate
+python manage.py runserver 0.0.0.0:8000`
+        : isFlaskBackend
+          ? `# 进入后端目录
+cd backend
+
+# 创建虚拟环境并激活
+python -m venv .venv
+# Windows: .venv\\Scripts\\activate
+# macOS/Linux: source .venv/bin/activate
+
+# 安装依赖
+pip install -r requirements.txt
+
+# 启动 Flask
+flask --app app run --host 0.0.0.0 --port 8000`
+          : isFastapiBackend
+            ? `# 进入后端目录
+cd backend
+
+# 创建虚拟环境并激活
+python -m venv .venv
+# Windows: .venv\\Scripts\\activate
+# macOS/Linux: source .venv/bin/activate
+
+# 安装依赖
+pip install -r requirements.txt
+
+# 启动 FastAPI
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload`
+            : `# 进入后端目录
+cd backend
+
+# 根据 README 安装依赖并启动
+# 如遇问题可在 AI 对话中粘贴报错信息继续排查`;
 
   const colorMap: Record<string, { bg: string; text: string; progressBg: string }> = {
     blue:   { bg: "bg-blue-100",   text: "text-blue-600",   progressBg: "bg-blue-500" },
@@ -370,7 +571,7 @@ export default function WorkspaceDetailPage() {
     );
   }
 
-  function renderStepCard({ step, color, title, desc, jobType, action, disabled }: {
+  function renderStepCard({ step, color, title, desc, jobType, action, disabled, waitingHint }: {
     step: number;
     color: string;
     title: string;
@@ -378,6 +579,7 @@ export default function WorkspaceDetailPage() {
     jobType: string;
     action: React.ReactNode;
     disabled?: boolean;
+    waitingHint?: string;
   }) {
     const c = colorMap[color] || colorMap.blue;
     const job = getJobForType(jobType);
@@ -399,6 +601,18 @@ export default function WorkspaceDetailPage() {
       !!job &&
       isPending &&
       Date.now() - new Date(job.createdAt).getTime() > 30_000;
+    const elapsedSeconds = job
+      ? Math.max(0, Math.floor((nowMs - new Date(job.createdAt).getTime()) / 1000))
+      : 0;
+    const stageCandidates = jobStageHints[jobType] || jobStageHints.CODE_GEN;
+    const syntheticStageIndex = Math.min(
+      stageCandidates.length - 1,
+      Math.max(0, Math.floor((job?.progress ?? 0) / (100 / stageCandidates.length)))
+    );
+    const spinningStageIndex =
+      stageCandidates.length > 0 ? Math.floor(elapsedSeconds / 4) % stageCandidates.length : 0;
+    const stageToShow =
+      stageText || stageCandidates[Math.max(syntheticStageIndex, spinningStageIndex)] || "";
 
     return (
       <div className={`rounded-lg border p-3 transition-colors ${disabled ? "opacity-60" : "hover:bg-muted/30"} ${isRunning ? "border-blue-300 bg-blue-50/50 ring-1 ring-blue-200" : ""} ${isCompleted ? "border-green-300 bg-green-50/30" : ""} ${isFailed ? "border-red-300 bg-red-50/30" : ""}`}>
@@ -422,6 +636,9 @@ export default function WorkspaceDetailPage() {
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>
+                {!!waitingHint && !isRunning && !isCompleted && !isFailed && (
+                  <p className="text-[11px] text-muted-foreground mt-1">{waitingHint}</p>
+                )}
               </div>
               {action}
             </div>
@@ -429,12 +646,38 @@ export default function WorkspaceDetailPage() {
               <div className="mt-2.5 space-y-1">
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-muted-foreground">
-                    {isRunning ? stageText || "正在生成中，请稍候..." : ""}
+                    {isRunning ? stageToShow || "正在生成中，请稍候..." : ""}
                   </span>
                   <span className="font-medium tabular-nums">{job.progress}%</span>
                 </div>
+                {isRunning && (
+                  <div className="flex flex-wrap items-center gap-1">
+                    {stageCandidates.map((hint, idx) => {
+                      const active =
+                        idx <= syntheticStageIndex ||
+                        (!stageText && idx === spinningStageIndex);
+                      return (
+                        <span
+                          key={`${jobType}-${idx}`}
+                          className={`rounded-full px-2 py-0.5 text-[10px] ${
+                            active
+                              ? "bg-blue-100 text-blue-700"
+                              : "bg-muted text-muted-foreground"
+                          }`}
+                        >
+                          {hint}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
                 {isRunning && detailText && (
                   <p className="text-[11px] text-muted-foreground">{detailText}</p>
+                )}
+                {isRunning && (
+                  <p className="text-[11px] text-muted-foreground">
+                    已运行 {formatElapsed(elapsedSeconds)} · 任务仍在执行，请勿刷新页面
+                  </p>
                 )}
                 {pendingTooLong && (
                   <p className="text-[11px] text-amber-600">
@@ -717,6 +960,11 @@ export default function WorkspaceDetailPage() {
                     {hasCodeFiles ? "已生成" : "生成代码"}
                   </Button>
                 ),
+                waitingHint: !featureConfirmed
+                  ? "请先完成上方“功能确认 + 难度评估”后再开始代码生成。"
+                  : hasCodeFiles
+                  ? "代码已生成，可继续预览与生成论文。"
+                  : undefined,
               })}
 
               {renderStepCard({
@@ -741,6 +989,13 @@ export default function WorkspaceDetailPage() {
                     生成论文
                   </Button>
                 ),
+                waitingHint: !hasCodeFiles
+                  ? waitingCodeHint
+                  : !previewConfirmed
+                  ? "请先完成步骤3预览确认后再生成论文。"
+                  : isCodeGenerating
+                  ? "步骤1进行中，暂不可启动论文生成。"
+                  : undefined,
               })}
 
               {renderStepCard({
@@ -767,6 +1022,9 @@ export default function WorkspaceDetailPage() {
                     </Button>
                   </div>
                 ),
+                waitingHint: !hasCodeFiles
+                  ? waitingCodeHint
+                  : undefined,
               })}
 
               {hasCodeFiles && !previewConfirmed && (
@@ -834,11 +1092,11 @@ export default function WorkspaceDetailPage() {
 
           {/* Chat */}
           {hasCodeFiles ? (
-            <Card className="h-[480px] flex flex-col border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
+            <Card className="flex h-[70vh] min-h-[560px] max-h-[860px] flex-col border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">AI 对话</CardTitle>
               </CardHeader>
-              <CardContent className="flex-1 overflow-hidden p-0">
+              <CardContent className="min-h-0 flex-1 overflow-hidden p-0">
                 <ChatPanel
                   workspaceId={workspace.id}
                   files={files}
@@ -916,8 +1174,18 @@ export default function WorkspaceDetailPage() {
                           </p>
                         )}
                       </div>
-                      <Button size="sm" variant={hasCode ? "default" : "outline"} disabled={!hasCode} className="shrink-0" onClick={() => downloadFiles("code")}>
-                        <Download className="mr-1 h-3 w-3" />
+                      <Button
+                        size="sm"
+                        variant={hasCode ? "default" : "outline"}
+                        disabled={!hasCode || downloadingType !== null}
+                        className="shrink-0"
+                        onClick={() => void downloadFiles("code")}
+                      >
+                        {downloadingType === "code" ? (
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        ) : (
+                          <Download className="mr-1 h-3 w-3" />
+                        )}
                         下载
                       </Button>
                     </div>
@@ -938,8 +1206,18 @@ export default function WorkspaceDetailPage() {
                           {hasThesis ? `${thesisFiles.length} 个文件` : "尚未生成"}
                         </p>
                       </div>
-                      <Button size="sm" variant={hasThesis ? "default" : "outline"} disabled={!hasThesis} className="shrink-0" onClick={() => downloadFiles("thesis")}>
-                        <Download className="mr-1 h-3 w-3" />
+                      <Button
+                        size="sm"
+                        variant={hasThesis ? "default" : "outline"}
+                        disabled={!hasThesis || downloadingType !== null}
+                        className="shrink-0"
+                        onClick={() => void downloadFiles("thesis")}
+                      >
+                        {downloadingType === "thesis" ? (
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        ) : (
+                          <Download className="mr-1 h-3 w-3" />
+                        )}
                         下载
                       </Button>
                     </div>
@@ -953,8 +1231,17 @@ export default function WorkspaceDetailPage() {
                           <p className="text-sm font-medium">图表文件</p>
                           <p className="text-xs text-muted-foreground">{chartFiles.length} 个文件</p>
                         </div>
-                        <Button size="sm" className="shrink-0" onClick={() => downloadFiles("chart")}>
-                          <Download className="mr-1 h-3 w-3" />
+                        <Button
+                          size="sm"
+                          className="shrink-0"
+                          disabled={downloadingType !== null}
+                          onClick={() => void downloadFiles("chart")}
+                        >
+                          {downloadingType === "chart" ? (
+                            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          ) : (
+                            <Download className="mr-1 h-3 w-3" />
+                          )}
                           下载
                         </Button>
                       </div>
@@ -1014,6 +1301,36 @@ export default function WorkspaceDetailPage() {
                       </p>
                     </div>
 
+                    {downloadMsg && (
+                      <div
+                        className={`rounded-md px-3 py-2 text-xs ${
+                          downloadMsg.type === "success"
+                            ? "bg-emerald-50 text-emerald-700"
+                            : "bg-rose-50 text-rose-700"
+                        }`}
+                      >
+                        {downloadMsg.text}
+                      </div>
+                    )}
+
+                    {downloadNeedRecharge && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
+                        <p className="text-sm font-medium text-amber-800">
+                          充值后解锁完整下载
+                        </p>
+                        <p className="text-xs text-amber-700">
+                          当前账号可继续预览与生成，下载完整代码/论文/图表压缩包需先充值一次 Token 点数。
+                        </p>
+                        <Button
+                          size="sm"
+                          className="w-full"
+                          onClick={() => router.push("/dashboard/billing")}
+                        >
+                          前往充值
+                        </Button>
+                      </div>
+                    )}
+
                     {hasAny && (
                       <Button
                         variant="outline"
@@ -1066,6 +1383,38 @@ export default function WorkspaceDetailPage() {
               </div>
             </CardContent>
           </Card>
+
+          {showSupportCard && (
+            <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">
+                  {platformPolicy?.supportContactTitle || "一对一辅导（人工）"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  {platformPolicy?.supportContactDescription ||
+                    "可联系客服获取选题把关、部署排错、答辩材料梳理等一对一支持。"}
+                </p>
+                {platformPolicy?.supportContactQrUrl ? (
+                  <div className="rounded-lg border bg-white p-2">
+                    <img
+                      src={platformPolicy.supportContactQrUrl}
+                      alt="客服二维码"
+                      className="mx-auto h-40 w-40 rounded object-contain"
+                    />
+                    <p className="mt-2 text-center text-[11px] text-muted-foreground">
+                      扫码添加客服
+                    </p>
+                  </div>
+                ) : (
+                  <div className="rounded-md bg-muted/50 px-3 py-2 text-[11px] text-muted-foreground">
+                    暂未配置二维码，请联系管理员在平台配置中补充。
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Stats */}
           <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
@@ -1153,14 +1502,20 @@ export default function WorkspaceDetailPage() {
                 1. 准备开发环境
               </h3>
               <div className="rounded-lg bg-muted/50 p-3 space-y-1.5 text-xs text-muted-foreground">
-                {workspace.techStack.backend?.includes("java") && (
+                {isJavaBackend && (
                   <>
                     <p>• 安装 <strong className="text-foreground">JDK 17+</strong>（推荐从 <a href="https://adoptium.net" target="_blank" className="text-blue-500 underline">adoptium.net</a> 下载）</p>
                     <p>• 安装 <strong className="text-foreground">Maven 3.8+</strong> 或使用项目自带的 mvnw</p>
                   </>
                 )}
-                {workspace.techStack.backend?.includes("node") && (
+                {isNodeBackend && (
                   <p>• 安装 <strong className="text-foreground">Node.js 18+</strong>（推荐从 <a href="https://nodejs.org" target="_blank" className="text-blue-500 underline">nodejs.org</a> 下载）</p>
+                )}
+                {isPythonBackend && (
+                  <>
+                    <p>• 安装 <strong className="text-foreground">Python 3.10+</strong>（建议启用 pip/venv）</p>
+                    <p>• 安装 <strong className="text-foreground">pip</strong>，并建议使用虚拟环境隔离依赖</p>
+                  </>
                 )}
                 {workspace.techStack.database?.includes("mysql") && (
                   <p>• 安装 <strong className="text-foreground">MySQL 8.0+</strong> 并创建数据库</p>
@@ -1185,41 +1540,12 @@ export default function WorkspaceDetailPage() {
                 <Settings className="h-4 w-4 text-green-500" />
                 2. 启动后端
               </h3>
-              {workspace.techStack.backend?.includes("java") ? (
-                <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">解压项目源代码，进入后端目录：</p>
-                  <pre className="rounded-md bg-gray-900 text-gray-100 p-3 text-xs overflow-x-auto">
-{`# 进入后端项目目录
-cd backend
-
-# 修改数据库配置
-# 编辑 src/main/resources/application.yml
-# 将数据库地址、用户名、密码改为你本地的
-
-# 初始化数据库（导入 SQL 文件）
-mysql -u root -p your_database < sql/init.sql
-
-# 启动项目
-mvn spring-boot:run`}
-                  </pre>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">解压项目源代码，进入后端目录：</p>
-                  <pre className="rounded-md bg-gray-900 text-gray-100 p-3 text-xs overflow-x-auto">
-{`# 进入后端项目目录
-cd backend
-
-# 安装依赖
-npm install
-
-# 修改 .env 文件中的数据库配置
-
-# 启动项目
-npm run dev`}
-                  </pre>
-                </div>
-              )}
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">解压项目源代码，进入后端目录：</p>
+                <pre className="rounded-md bg-gray-900 text-gray-100 p-3 text-xs overflow-x-auto">
+{backendRunGuide}
+                </pre>
+              </div>
             </div>
 
             <Separator />

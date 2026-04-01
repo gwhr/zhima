@@ -92,6 +92,32 @@ const requirementHints = [
   "生成可行性报告...",
 ];
 
+type TechOption = { value: string; label: string };
+
+const backendOptions: TechOption[] = [
+  { value: "java-springboot", label: "Java + SpringBoot" },
+  { value: "nodejs-express", label: "Node.js + Express" },
+  { value: "nodejs-koa", label: "Node.js + Koa" },
+  { value: "python-fastapi", label: "Python + FastAPI" },
+  { value: "python-flask", label: "Python + Flask" },
+  { value: "python-django", label: "Python + Django" },
+];
+
+const databaseOptions: TechOption[] = [
+  { value: "mysql", label: "MySQL" },
+  { value: "postgresql", label: "PostgreSQL" },
+  { value: "mongodb", label: "MongoDB" },
+];
+
+const frontendOptions: TechOption[] = [
+  { value: "vue3", label: "Vue 3" },
+  { value: "react", label: "React" },
+];
+
+function getOptionLabel(options: TechOption[], value: string): string {
+  return options.find((item) => item.value === value)?.label ?? value;
+}
+
 export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) {
   const router = useRouter();
 
@@ -142,6 +168,10 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
   }
 
   const finalTopic = customTopic || selectedTopic;
+  const backendLabel = getOptionLabel(backendOptions, backend);
+  const databaseLabel = getOptionLabel(databaseOptions, database);
+  const frontendLabel = getOptionLabel(frontendOptions, frontend);
+  const selectedTechStackLabel = `${backendLabel} + ${databaseLabel} + ${frontendLabel}`;
 
   function startHintCycle(hints: string[]) {
     let idx = 0;
@@ -171,6 +201,7 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
         body: JSON.stringify({
           keyword,
           majorCategory,
+          techStack: { backend, database, frontend },
           batch: nextBatch,
           excludeTitles: existingTitles,
         }),
@@ -293,7 +324,7 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-xl max-h-[85vh] overflow-y-auto">
+      <DialogContent className="w-[calc(100vw-1.5rem)] sm:w-full sm:max-w-2xl max-h-[85vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-primary" />
@@ -322,6 +353,79 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
               <p className="text-xs text-blue-700">
                 当前版本仅开放信息系统/软件工程方向（用户端 + 管理端 + 数据库）。目标检测等算法研究方向将后续新增。
               </p>
+            </div>
+            <div className="rounded-lg border border-border/60 bg-muted/20 p-3 space-y-3">
+              <div className="space-y-2">
+                <Label>专业分类（用于推荐）</Label>
+                <Select
+                  value={majorCategory}
+                  onValueChange={(value) => setMajorCategory(value as MajorCategory)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="computer">计算机相关专业（推荐）</SelectItem>
+                    <SelectItem value="non-computer">非计算机专业</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>技术栈偏好（用于选题推荐）</Label>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">后端技术</Label>
+                    <Select value={backend} onValueChange={setBackend}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {backendOptions.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">数据库</Label>
+                    <Select value={database} onValueChange={setDatabase}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {databaseOptions.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">前端技术</Label>
+                    <Select value={frontend} onValueChange={setFrontend}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {frontendOptions.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  AI 会把关键词 + 你选的技术栈一起检索，避免推荐结果与后续技术栈不一致。
+                </p>
+                <Badge variant="secondary" className="text-xs">
+                  当前推荐技术栈：{selectedTechStackLabel}
+                </Badge>
+              </div>
             </div>
             <div className="flex gap-2">
               <Input
@@ -372,8 +476,11 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
             {suggestions.length > 0 && (
               <>
                 <p className="text-sm text-muted-foreground">
-                  AI 已按信息系统/软件类方向推荐题目，点击选择。选好后下一步会看到完整功能清单，你可以自由增减。
+                  AI 已按信息系统/软件类方向 + 你选择的技术栈推荐题目。选好后下一步会看到完整功能清单，你可以自由增减。
                 </p>
+                <Badge variant="outline" className="w-fit text-xs">
+                  推荐技术栈：{selectedTechStackLabel}
+                </Badge>
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-xs text-muted-foreground">
                     已为你推荐 {suggestions.length} 个题目（第 {topicBatch} 批）
@@ -393,12 +500,12 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
                     再来一批
                   </Button>
                 </div>
-                <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
+                <div className="space-y-2.5 max-h-[380px] overflow-y-auto overflow-x-hidden pr-2">
                   {suggestions.map((s, i) => (
                     <div
                       key={i}
                       className={cn(
-                        "flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors",
+                        "flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors overflow-hidden",
                         selectedTopic === s.title
                           ? "border-primary bg-primary/5"
                           : "hover:bg-muted/50"
@@ -430,8 +537,11 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
                             <span>{s.coreFeatures}</span>
                           </p>
                         )}
-                        <div className="flex items-center gap-2 mt-1.5">
-                          <Badge variant="secondary" className="text-xs">
+                        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                          <Badge
+                            variant="secondary"
+                            className="max-w-full whitespace-normal break-words text-xs"
+                          >
                             {s.techStack}
                           </Badge>
                           <div className="flex items-center gap-0.5">
@@ -541,17 +651,17 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
                   不确定选什么？先用默认的就行！后续在工作空间里随时可以通过 AI 对话更换技术栈，不影响后面的操作。
                 </p>
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div className="space-y-1.5">
                   <Label className="text-xs text-muted-foreground">后端技术</Label>
                   <Select value={backend} onValueChange={setBackend}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="java-springboot">Java + SpringBoot</SelectItem>
-                      <SelectItem value="nodejs-express">Node.js + Express</SelectItem>
-                      <SelectItem value="nodejs-koa">Node.js + Koa</SelectItem>
-                      <SelectItem value="python-fastapi">Python + FastAPI</SelectItem>
-                      <SelectItem value="python-flask">Python + Flask</SelectItem>
+                      {backendOptions.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -560,9 +670,11 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
                   <Select value={database} onValueChange={setDatabase}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="mysql">MySQL</SelectItem>
-                      <SelectItem value="postgresql">PostgreSQL</SelectItem>
-                      <SelectItem value="mongodb">MongoDB</SelectItem>
+                      {databaseOptions.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -571,8 +683,11 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
                   <Select value={frontend} onValueChange={setFrontend}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="vue3">Vue 3</SelectItem>
-                      <SelectItem value="react">React</SelectItem>
+                      {frontendOptions.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>

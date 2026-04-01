@@ -337,6 +337,274 @@ function normalizeGeneratedFiles(
   return Array.from(deduped.values());
 }
 
+function hasPath(files: ParsedFile[], matcher: RegExp): boolean {
+  return files.some((file) => matcher.test(file.path.toLowerCase()));
+}
+
+function addMissingFiles(baseFiles: ParsedFile[], extras: ParsedFile[]): ParsedFile[] {
+  const merged = new Map<string, ParsedFile>();
+  for (const file of baseFiles) {
+    merged.set(file.path.toLowerCase(), file);
+  }
+  for (const file of extras) {
+    const key = file.path.toLowerCase();
+    if (!merged.has(key)) {
+      merged.set(key, file);
+    }
+  }
+  return Array.from(merged.values());
+}
+
+function buildRunnableReadme(
+  workspaceName: string,
+  workspaceTopic: string,
+  techStack: Record<string, string>
+): string {
+  const backend = (techStack.backend || "").toLowerCase();
+  const frontend = (techStack.frontend || "").toLowerCase();
+
+  const backendRun = backend.includes("java")
+    ? [
+        "cd backend",
+        "mvn -q -DskipTests spring-boot:run",
+      ]
+    : [
+        "cd backend",
+        "npm install",
+        "npm run dev",
+      ];
+
+  const frontendRun =
+    frontend.includes("vue") || frontend.includes("react")
+      ? ["cd frontend", "npm install", "npm run dev"]
+      : ["cd frontend", "npm install", "npm run dev"];
+
+  return `# ${workspaceName}
+
+## 项目说明
+
+本项目由智码助手根据「${workspaceTopic}」生成，已补齐可运行的最小项目结构。
+
+## 技术栈
+
+- backend: ${techStack.backend || "未指定"}
+- frontend: ${techStack.frontend || "未指定"}
+- database: ${techStack.database || "未指定"}
+
+## 快速启动
+
+### 1) 启动后端
+
+\`\`\`bash
+${backendRun.join("\n")}
+\`\`\`
+
+### 2) 启动前端
+
+\`\`\`bash
+${frontendRun.join("\n")}
+\`\`\`
+
+### 3) 默认地址
+
+- 前端开发服务: http://127.0.0.1:5173
+- 后端开发服务: http://127.0.0.1:8080 (Java) / http://127.0.0.1:3001 (Node)
+`;
+}
+
+function ensureRunnableProjectFiles(
+  files: ParsedFile[],
+  workspaceName: string,
+  workspaceTopic: string,
+  techStack: Record<string, string>
+): ParsedFile[] {
+  const backend = (techStack.backend || "").toLowerCase();
+  const frontend = (techStack.frontend || "").toLowerCase();
+  const extras: ParsedFile[] = [];
+
+  if (!hasPath(files, /^readme\.md$/i)) {
+    extras.push({
+      path: "README.md",
+      language: "markdown",
+      content: buildRunnableReadme(workspaceName, workspaceTopic, techStack),
+    });
+  }
+
+  if (!hasPath(files, /^backend\/sql\/.+\.sql$/i)) {
+    extras.push({
+      path: "backend/sql/init.sql",
+      language: "sql",
+      content:
+        "-- initialize demo tables\nCREATE TABLE IF NOT EXISTS users (\n  id BIGINT PRIMARY KEY,\n  username VARCHAR(64) NOT NULL,\n  password VARCHAR(128) NOT NULL,\n  role VARCHAR(32) DEFAULT 'USER'\n);\n",
+    });
+  }
+
+  if (backend.includes("java")) {
+    if (!hasPath(files, /^backend\/pom\.xml$/i)) {
+      extras.push({
+        path: "backend/pom.xml",
+        language: "xml",
+        content:
+          "<project xmlns=\"http://maven.apache.org/POM/4.0.0\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:schemaLocation=\"http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd\">\n  <modelVersion>4.0.0</modelVersion>\n  <groupId>com.example</groupId>\n  <artifactId>demo</artifactId>\n  <version>0.0.1-SNAPSHOT</version>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.5</version>\n  </parent>\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-validation</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.mysql</groupId>\n      <artifactId>mysql-connector-j</artifactId>\n      <scope>runtime</scope>\n    </dependency>\n  </dependencies>\n  <build>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+      });
+    }
+    if (
+      !hasPath(
+        files,
+        /^backend\/src\/main\/java\/.+\/[a-z0-9_]+application\.java$/i
+      )
+    ) {
+      extras.push({
+        path: "backend/src/main/java/com/example/Application.java",
+        language: "java",
+        content:
+          "package com.example;\n\nimport org.springframework.boot.SpringApplication;\nimport org.springframework.boot.autoconfigure.SpringBootApplication;\n\n@SpringBootApplication\npublic class Application {\n  public static void main(String[] args) {\n    SpringApplication.run(Application.class, args);\n  }\n}\n",
+      });
+    }
+    if (
+      !hasPath(
+        files,
+        /^backend\/src\/main\/resources\/application(\-[a-z0-9]+)?\.ya?ml$/i
+      )
+    ) {
+      extras.push({
+        path: "backend/src/main/resources/application.yml",
+        language: "yaml",
+        content:
+          "server:\n  port: 8080\nspring:\n  datasource:\n    url: jdbc:mysql://127.0.0.1:3306/demo?useSSL=false&serverTimezone=UTC\n    username: root\n    password: root\n",
+      });
+    }
+    if (
+      !hasPath(files, /^backend\/src\/main\/java\/.+\/controller\/.+\.java$/i)
+    ) {
+      extras.push({
+        path: "backend/src/main/java/com/example/controller/HealthController.java",
+        language: "java",
+        content:
+          "package com.example.controller;\n\nimport org.springframework.web.bind.annotation.GetMapping;\nimport org.springframework.web.bind.annotation.RestController;\n\n@RestController\npublic class HealthController {\n  @GetMapping(\"/api/health\")\n  public String health() {\n    return \"ok\";\n  }\n}\n",
+      });
+    }
+  } else {
+    if (!hasPath(files, /^backend\/package\.json$/i)) {
+      extras.push({
+        path: "backend/package.json",
+        language: "json",
+        content:
+          '{\n  "name": "backend",\n  "private": true,\n  "type": "module",\n  "scripts": {\n    "dev": "node src/main.js"\n  },\n  "dependencies": {\n    "express": "^4.19.2",\n    "cors": "^2.8.5"\n  }\n}\n',
+      });
+    }
+    if (!hasPath(files, /^backend\/src\/main\.(js|ts)$/i)) {
+      extras.push({
+        path: "backend/src/main.js",
+        language: "javascript",
+        content:
+          "import express from \"express\";\nimport cors from \"cors\";\n\nconst app = express();\napp.use(cors());\napp.use(express.json());\n\napp.get(\"/api/health\", (_req, res) => {\n  res.json({ ok: true });\n});\n\napp.listen(3001, () => {\n  console.log(\"backend running on http://127.0.0.1:3001\");\n});\n",
+      });
+    }
+  }
+
+  if (frontend.includes("vue")) {
+    if (!hasPath(files, /^frontend\/package\.json$/i)) {
+      extras.push({
+        path: "frontend/package.json",
+        language: "json",
+        content:
+          '{\n  "name": "frontend",\n  "private": true,\n  "version": "0.0.0",\n  "type": "module",\n  "scripts": {\n    "dev": "vite",\n    "build": "vite build",\n    "preview": "vite preview"\n  },\n  "dependencies": {\n    "vue": "^3.5.13",\n    "vue-router": "^4.4.5"\n  },\n  "devDependencies": {\n    "vite": "^5.4.9"\n  }\n}\n',
+      });
+    }
+    if (!hasPath(files, /^frontend\/vite\.config\.(js|ts)$/i)) {
+      extras.push({
+        path: "frontend/vite.config.js",
+        language: "javascript",
+        content:
+          "import { defineConfig } from \"vite\";\n\nexport default defineConfig({\n  server: {\n    host: \"0.0.0.0\",\n    port: 5173,\n  },\n});\n",
+      });
+    }
+    if (!hasPath(files, /^frontend\/index\.html$/i)) {
+      extras.push({
+        path: "frontend/index.html",
+        language: "html",
+        content:
+          "<!doctype html>\n<html lang=\"zh-CN\">\n  <head>\n    <meta charset=\"UTF-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n    <title>毕业设计项目</title>\n  </head>\n  <body>\n    <div id=\"app\"></div>\n    <script type=\"module\" src=\"/src/main.js\"></script>\n  </body>\n</html>\n",
+      });
+    }
+    if (!hasPath(files, /^frontend\/src\/main\.(js|ts)$/i)) {
+      extras.push({
+        path: "frontend/src/main.js",
+        language: "javascript",
+        content:
+          "import { createApp } from \"vue\";\nimport App from \"./App.vue\";\n\ncreateApp(App).mount(\"#app\");\n",
+      });
+    }
+    if (!hasPath(files, /^frontend\/src\/app\.vue$/i)) {
+      extras.push({
+        path: "frontend/src/App.vue",
+        language: "vue",
+        content:
+          "<template>\n  <main style=\"padding: 24px; font-family: Arial, sans-serif;\">\n    <h1>项目已生成</h1>\n    <p>你可以在此基础上继续完善业务逻辑。</p>\n  </main>\n</template>\n",
+      });
+    }
+  } else if (frontend.includes("react")) {
+    if (!hasPath(files, /^frontend\/package\.json$/i)) {
+      extras.push({
+        path: "frontend/package.json",
+        language: "json",
+        content:
+          '{\n  "name": "frontend",\n  "private": true,\n  "version": "0.0.0",\n  "type": "module",\n  "scripts": {\n    "dev": "vite",\n    "build": "tsc && vite build",\n    "preview": "vite preview"\n  },\n  "dependencies": {\n    "react": "^18.3.1",\n    "react-dom": "^18.3.1"\n  },\n  "devDependencies": {\n    "@types/react": "^18.3.11",\n    "@types/react-dom": "^18.3.1",\n    "typescript": "^5.6.3",\n    "vite": "^5.4.9"\n  }\n}\n',
+      });
+    }
+    if (!hasPath(files, /^frontend\/vite\.config\.(js|ts)$/i)) {
+      extras.push({
+        path: "frontend/vite.config.ts",
+        language: "typescript",
+        content:
+          'import { defineConfig } from "vite";\n\nexport default defineConfig({\n  server: {\n    host: "0.0.0.0",\n    port: 5173,\n  },\n});\n',
+      });
+    }
+    if (!hasPath(files, /^frontend\/index\.html$/i)) {
+      extras.push({
+        path: "frontend/index.html",
+        language: "html",
+        content:
+          "<!doctype html>\n<html lang=\"zh-CN\">\n  <head>\n    <meta charset=\"UTF-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n    <title>毕业设计项目</title>\n  </head>\n  <body>\n    <div id=\"root\"></div>\n    <script type=\"module\" src=\"/src/main.tsx\"></script>\n  </body>\n</html>\n",
+      });
+    }
+    if (!hasPath(files, /^frontend\/src\/main\.(tsx|jsx)$/i)) {
+      extras.push({
+        path: "frontend/src/main.tsx",
+        language: "typescript",
+        content:
+          'import React from "react";\nimport { createRoot } from "react-dom/client";\nimport App from "./App";\n\ncreateRoot(document.getElementById("root")!).render(<App />);\n',
+      });
+    }
+    if (!hasPath(files, /^frontend\/src\/app\.(tsx|jsx)$/i)) {
+      extras.push({
+        path: "frontend/src/App.tsx",
+        language: "typescript",
+        content:
+          "export default function App() {\n  return (\n    <main style={{ padding: 24, fontFamily: \"Arial, sans-serif\" }}>\n      <h1>项目已生成</h1>\n      <p>你可以在此基础上继续完善业务逻辑。</p>\n    </main>\n  );\n}\n",
+      });
+    }
+  }
+
+  if (!hasPath(files, /^backend\/readme\.md$/i)) {
+    extras.push({
+      path: "backend/README.md",
+      language: "markdown",
+      content: "# Backend\n\n后端目录已补齐启动所需基础文件。\n",
+    });
+  }
+  if (!hasPath(files, /^frontend\/readme\.md$/i)) {
+    extras.push({
+      path: "frontend/README.md",
+      language: "markdown",
+      content: "# Frontend\n\n前端目录已补齐启动所需基础文件。\n",
+    });
+  }
+
+  return addMissingFiles(files, extras);
+}
+
 function buildCodeGenPrompt(
   workspace: { name: string; topic: string; techStack: unknown; requirements: unknown }
 ): string {
@@ -359,7 +627,10 @@ function buildCodeGenPrompt(
   const tablesText = tables.map((t) => `- ${t}`).join("\n") || "- users";
   const dualEndRule = dualEndRequired
     ? "7. 本项目必须同时包含“用户端”和“后台管理端”两套页面（或路由）与对应后端接口。"
-    : "7. 如需求中包含管理员角色，请至少提供 1 个管理端页面与 1 个管理端接口。";
+    : "7. 按需求决定系统端形态（单端/双端/多端），不要强行添加无关端；若出现管理角色，再补充管理端页面与接口。";
+  const uiQualityRules = `
+8. 前端不要只给“单页占位内容”，至少提供 2 个有业务字段/交互的页面，并且导航可切换。
+9. UI 需具备基础美观度：统一字号与间距层级、主次按钮区分、卡片/表格有留白边界，并适配常见桌面宽度。`;
 
   return `你是资深全栈工程师。请为以下毕设项目生成“可运行”的最小完整代码骨架。
 
@@ -388,6 +659,7 @@ File: 相对路径
 5. 必须覆盖：后端入口、前端入口、至少 2 个业务页面、至少 2 个 API、1 个数据模型/SQL、1 个配置文件。
 6. 代码风格以教学可读性为主，可添加必要中文注释。
 ${dualEndRule}
+${uiQualityRules}
 
 建议目录结构（按技术栈灵活调整）：
 - backend/
@@ -405,9 +677,9 @@ function buildCodeGenAttemptPrompt(
 ): string {
   if (attempt === 1) return basePrompt;
 
-  const dualEndRetryRule = dualEndRequired
+  const structureRetryRule = dualEndRequired
     ? "5. 必须出现用户端页面（如 frontend/src/views/user/**）和管理端页面（如 frontend/src/views/admin/**），并提供对应 API。"
-    : "";
+    : "5. 端形态按需求决定，页面与 API 需要与 roles/modules 对齐；若无管理角色，不要硬塞 admin 页面。";
 
   return `${basePrompt}
 
@@ -427,7 +699,8 @@ File: 相对路径
 - frontend 至少 2 个页面
 - README.md
 4. 只输出代码文件，不要输出解释文字。
-${dualEndRetryRule}`;
+${structureRetryRule}
+6. 前端页面必须包含基础样式与信息层次，不要仅返回纯文本段落。`;
 }
 
 async function generateCodeFilesWithRetry(
@@ -463,6 +736,12 @@ async function generateCodeFilesWithRetry(
     );
     files = normalizeGeneratedFiles(
       parseCodeBlocks(result.text),
+      workspace.name,
+      workspace.topic,
+      techStack
+    );
+    files = ensureRunnableProjectFiles(
+      files,
       workspace.name,
       workspace.topic,
       techStack
@@ -524,16 +803,16 @@ async function generateCodeFilesWithRetry(
           "package com.example.controller;\n\nimport org.springframework.web.bind.annotation.GetMapping;\nimport org.springframework.web.bind.annotation.RestController;\n\n@RestController\npublic class HealthController {\n  @GetMapping(\"/api/health\")\n  public String health() {\n    return \"ok\";\n  }\n}\n",
       },
       {
-        path: "backend/src/main/java/com/example/controller/UserController.java",
+        path: "backend/src/main/java/com/example/controller/ItemController.java",
         language: "java",
         content:
-          "package com.example.controller;\n\nimport org.springframework.web.bind.annotation.GetMapping;\nimport org.springframework.web.bind.annotation.RequestMapping;\nimport org.springframework.web.bind.annotation.RestController;\n\nimport java.util.List;\nimport java.util.Map;\n\n@RestController\n@RequestMapping(\"/api/user\")\npublic class UserController {\n  @GetMapping(\"/products\")\n  public List<Map<String, Object>> products() {\n    return List.of(Map.of(\"id\", 1, \"name\", \"示例商品\", \"price\", 99.0));\n  }\n}\n",
+          "package com.example.controller;\n\nimport org.springframework.web.bind.annotation.GetMapping;\nimport org.springframework.web.bind.annotation.RequestMapping;\nimport org.springframework.web.bind.annotation.RestController;\n\nimport java.util.List;\nimport java.util.Map;\n\n@RestController\n@RequestMapping(\"/api/items\")\npublic class ItemController {\n  @GetMapping\n  public List<Map<String, Object>> list() {\n    return List.of(Map.of(\"id\", 1, \"name\", \"示例条目\", \"price\", 99.0));\n  }\n}\n",
       },
       {
-        path: "backend/src/main/java/com/example/controller/AdminController.java",
+        path: "backend/src/main/java/com/example/controller/StatsController.java",
         language: "java",
         content:
-          "package com.example.controller;\n\nimport org.springframework.web.bind.annotation.GetMapping;\nimport org.springframework.web.bind.annotation.RequestMapping;\nimport org.springframework.web.bind.annotation.RestController;\n\nimport java.util.Map;\n\n@RestController\n@RequestMapping(\"/api/admin\")\npublic class AdminController {\n  @GetMapping(\"/dashboard\")\n  public Map<String, Object> dashboard() {\n    return Map.of(\"users\", 120, \"orders\", 35, \"sales\", 10240);\n  }\n}\n",
+          "package com.example.controller;\n\nimport org.springframework.web.bind.annotation.GetMapping;\nimport org.springframework.web.bind.annotation.RequestMapping;\nimport org.springframework.web.bind.annotation.RestController;\n\nimport java.util.Map;\n\n@RestController\n@RequestMapping(\"/api/stats\")\npublic class StatsController {\n  @GetMapping\n  public Map<String, Object> overview() {\n    return Map.of(\"users\", 120, \"orders\", 35, \"sales\", 10240);\n  }\n}\n",
       },
       {
         path: "backend/src/main/java/com/example/entity/User.java",
@@ -572,7 +851,7 @@ async function generateCodeFilesWithRetry(
         path: "backend/src/main.js",
         language: "javascript",
         content:
-          "import http from \"node:http\";\nimport { userProducts } from \"./routes/user.js\";\nimport { adminDashboard } from \"./routes/admin.js\";\n\nconst server = http.createServer((req, res) => {\n  res.setHeader(\"content-type\", \"application/json\");\n  if (req.url === \"/api/user/products\") return res.end(JSON.stringify(userProducts()));\n  if (req.url === \"/api/admin/dashboard\") return res.end(JSON.stringify(adminDashboard()));\n  return res.end(JSON.stringify({ ok: true }));\n});\n\nserver.listen(3001, () => {\n  console.log(\"backend running on :3001\");\n});\n",
+          "import http from \"node:http\";\nimport { listItems } from \"./routes/items.js\";\nimport { getStats } from \"./routes/stats.js\";\n\nconst server = http.createServer((req, res) => {\n  res.setHeader(\"content-type\", \"application/json\");\n  if (req.url === \"/api/items\") return res.end(JSON.stringify(listItems()));\n  if (req.url === \"/api/stats\") return res.end(JSON.stringify(getStats()));\n  return res.end(JSON.stringify({ ok: true }));\n});\n\nserver.listen(3001, () => {\n  console.log(\"backend running on :3001\");\n});\n",
       },
       {
         path: "backend/src/routes/health.js",
@@ -580,14 +859,14 @@ async function generateCodeFilesWithRetry(
         content: "export const health = { status: \"ok\" };\n",
       },
       {
-        path: "backend/src/routes/user.js",
+        path: "backend/src/routes/items.js",
         language: "javascript",
-        content: "export function userProducts() {\n  return [{ id: 1, name: \"示例商品\", price: 99 }];\n}\n",
+        content: "export function listItems() {\n  return [{ id: 1, name: \"示例条目\", price: 99 }];\n}\n",
       },
       {
-        path: "backend/src/routes/admin.js",
+        path: "backend/src/routes/stats.js",
         language: "javascript",
-        content: "export function adminDashboard() {\n  return { users: 100, orders: 20, sales: 8000 };\n}\n",
+        content: "export function getStats() {\n  return { users: 100, orders: 20, sales: 8000 };\n}\n",
       }
     );
   }
@@ -616,37 +895,31 @@ async function generateCodeFilesWithRetry(
         path: "frontend/src/router/index.js",
         language: "javascript",
         content:
-          "import { createRouter, createWebHashHistory } from \"vue-router\";\nimport UserHomeView from \"../views/user/HomeView.vue\";\nimport UserProductView from \"../views/user/ProductListView.vue\";\nimport AdminDashboardView from \"../views/admin/DashboardView.vue\";\nimport AdminProductManageView from \"../views/admin/ProductManageView.vue\";\n\nconst routes = [\n  { path: \"/\", component: UserHomeView },\n  { path: \"/user/products\", component: UserProductView },\n  { path: \"/admin/dashboard\", component: AdminDashboardView },\n  { path: \"/admin/products\", component: AdminProductManageView },\n];\n\nexport default createRouter({ history: createWebHashHistory(), routes });\n",
+          "import { createRouter, createWebHashHistory } from \"vue-router\";\nimport OverviewView from \"../views/OverviewView.vue\";\nimport WorkflowView from \"../views/WorkflowView.vue\";\nimport DataBoardView from \"../views/DataBoardView.vue\";\n\nconst routes = [\n  { path: \"/\", component: OverviewView },\n  { path: \"/workflow\", component: WorkflowView },\n  { path: \"/data-board\", component: DataBoardView },\n];\n\nexport default createRouter({ history: createWebHashHistory(), routes });\n",
       },
       {
         path: "frontend/src/App.vue",
         language: "vue",
         content:
-          "<template>\n  <main style=\"padding: 20px; font-family: Arial;\">\n    <h1>项目骨架已生成</h1>\n    <p>包含用户端与后台管理端示例路由。</p>\n    <nav style=\"display:flex; gap: 12px; margin-top: 12px;\">\n      <RouterLink to=\"/\">用户首页</RouterLink>\n      <RouterLink to=\"/user/products\">用户商品</RouterLink>\n      <RouterLink to=\"/admin/dashboard\">管理仪表盘</RouterLink>\n      <RouterLink to=\"/admin/products\">管理商品</RouterLink>\n    </nav>\n    <RouterView style=\"margin-top: 16px;\" />\n  </main>\n</template>\n",
+          "<template>\n  <main style=\"padding: 24px; font-family: Arial, sans-serif; max-width: 960px; margin: 0 auto;\">\n    <header style=\"display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;\">\n      <div>\n        <h1 style=\"margin:0;\">项目骨架已生成</h1>\n        <p style=\"margin-top:6px; color:#64748b;\">按当前需求生成的示例模块路由，可继续在此基础上扩展。</p>\n      </div>\n      <span style=\"font-size:12px; background:#e0f2fe; color:#0369a1; padding:6px 10px; border-radius:999px;\">可运行示例</span>\n    </header>\n    <nav style=\"display:flex; gap: 10px; margin-top: 16px; flex-wrap: wrap;\">\n      <RouterLink to=\"/\" style=\"padding:8px 12px; border:1px solid #cbd5e1; border-radius:8px; text-decoration:none;\">概览页</RouterLink>\n      <RouterLink to=\"/workflow\" style=\"padding:8px 12px; border:1px solid #cbd5e1; border-radius:8px; text-decoration:none;\">流程页</RouterLink>\n      <RouterLink to=\"/data-board\" style=\"padding:8px 12px; border:1px solid #cbd5e1; border-radius:8px; text-decoration:none;\">数据看板</RouterLink>\n    </nav>\n    <section style=\"margin-top: 16px; border:1px solid #e2e8f0; border-radius:12px; padding:16px; background:#f8fafc;\">\n      <RouterView />\n    </section>\n  </main>\n</template>\n",
       },
       {
-        path: "frontend/src/views/user/HomeView.vue",
+        path: "frontend/src/views/OverviewView.vue",
         language: "vue",
         content:
-          "<template><section><h2>用户首页</h2><p>这里展示公告和推荐内容。</p></section></template>\n",
+          "<template><section><h2>概览页</h2><p>展示项目摘要、核心指标和近期动态。</p></section></template>\n",
       },
       {
-        path: "frontend/src/views/user/ProductListView.vue",
+        path: "frontend/src/views/WorkflowView.vue",
         language: "vue",
         content:
-          "<template><section><h2>用户商品列表</h2><p>这里展示可浏览/购买商品。</p></section></template>\n",
+          "<template><section><h2>流程页</h2><p>展示业务流程节点、处理状态和操作入口。</p></section></template>\n",
       },
       {
-        path: "frontend/src/views/admin/DashboardView.vue",
+        path: "frontend/src/views/DataBoardView.vue",
         language: "vue",
         content:
-          "<template><section><h2>管理端仪表盘</h2><p>这里展示用户数、订单数和销售额。</p></section></template>\n",
-      },
-      {
-        path: "frontend/src/views/admin/ProductManageView.vue",
-        language: "vue",
-        content:
-          "<template><section><h2>管理端商品管理</h2><p>这里可进行商品上下架与编辑。</p></section></template>\n",
+          "<template><section><h2>数据看板</h2><p>展示统计图表、趋势指标和业务监控信息。</p></section></template>\n",
       }
     );
   } else {
@@ -673,31 +946,25 @@ async function generateCodeFilesWithRetry(
         path: "frontend/src/App.tsx",
         language: "typescript",
         content:
-          "import { useState } from \"react\";\nimport { AdminDashboardPage } from \"./pages/admin/DashboardPage\";\nimport { AdminProductManagePage } from \"./pages/admin/ProductManagePage\";\nimport { UserHomePage } from \"./pages/user/HomePage\";\nimport { UserProductPage } from \"./pages/user/ProductPage\";\n\ntype View = \"userHome\" | \"userProducts\" | \"adminDashboard\" | \"adminProducts\";\n\nexport default function App() {\n  const [view, setView] = useState<View>(\"userHome\");\n  return (\n    <main style={{ padding: 24, fontFamily: \"Arial\" }}>\n      <h1>项目骨架已生成</h1>\n      <p>包含用户端与后台管理端示例页面。</p>\n      <div style={{ display: \"flex\", gap: 8, margin: \"12px 0\" }}>\n        <button onClick={() => setView(\"userHome\")}>用户首页</button>\n        <button onClick={() => setView(\"userProducts\")}>用户商品</button>\n        <button onClick={() => setView(\"adminDashboard\")}>管理仪表盘</button>\n        <button onClick={() => setView(\"adminProducts\")}>管理商品</button>\n      </div>\n      {view === \"userHome\" && <UserHomePage />}\n      {view === \"userProducts\" && <UserProductPage />}\n      {view === \"adminDashboard\" && <AdminDashboardPage />}\n      {view === \"adminProducts\" && <AdminProductManagePage />}\n    </main>\n  );\n}\n",
+          "import { useState } from \"react\";\nimport { OverviewPage } from \"./pages/OverviewPage\";\nimport { WorkflowPage } from \"./pages/WorkflowPage\";\nimport { DataBoardPage } from \"./pages/DataBoardPage\";\n\ntype View = \"overview\" | \"workflow\" | \"dataBoard\";\n\nconst tabStyle: React.CSSProperties = {\n  padding: \"8px 12px\",\n  border: \"1px solid #cbd5e1\",\n  borderRadius: 8,\n  background: \"#fff\",\n  cursor: \"pointer\",\n};\n\nexport default function App() {\n  const [view, setView] = useState<View>(\"overview\");\n  return (\n    <main style={{ padding: 24, fontFamily: \"Arial, sans-serif\", maxWidth: 960, margin: \"0 auto\" }}>\n      <h1 style={{ margin: 0 }}>项目骨架已生成</h1>\n      <p style={{ color: \"#64748b\", marginTop: 8 }}>按需求生成的可运行示例页面，可继续扩展业务逻辑。</p>\n      <div style={{ display: \"flex\", gap: 8, margin: \"12px 0\", flexWrap: \"wrap\" }}>\n        <button style={tabStyle} onClick={() => setView(\"overview\")}>概览页</button>\n        <button style={tabStyle} onClick={() => setView(\"workflow\")}>流程页</button>\n        <button style={tabStyle} onClick={() => setView(\"dataBoard\")}>数据看板</button>\n      </div>\n      <section style={{ border: \"1px solid #e2e8f0\", borderRadius: 12, padding: 16, background: \"#f8fafc\" }}>\n        {view === \"overview\" && <OverviewPage />}\n        {view === \"workflow\" && <WorkflowPage />}\n        {view === \"dataBoard\" && <DataBoardPage />}\n      </section>\n    </main>\n  );\n}\n",
       },
       {
-        path: "frontend/src/pages/user/HomePage.tsx",
+        path: "frontend/src/pages/OverviewPage.tsx",
         language: "typescript",
         content:
-          "export function UserHomePage() {\n  return <section><h2>用户首页</h2><p>展示公告和推荐内容。</p></section>;\n}\n",
+          "export function OverviewPage() {\n  return <section><h2>概览页</h2><p>展示项目摘要、核心指标和近期动态。</p></section>;\n}\n",
       },
       {
-        path: "frontend/src/pages/user/ProductPage.tsx",
+        path: "frontend/src/pages/WorkflowPage.tsx",
         language: "typescript",
         content:
-          "export function UserProductPage() {\n  return <section><h2>用户商品页</h2><p>展示商品列表与购买入口。</p></section>;\n}\n",
+          "export function WorkflowPage() {\n  return <section><h2>流程页</h2><p>展示业务流程节点、处理状态和操作入口。</p></section>;\n}\n",
       },
       {
-        path: "frontend/src/pages/admin/DashboardPage.tsx",
+        path: "frontend/src/pages/DataBoardPage.tsx",
         language: "typescript",
         content:
-          "export function AdminDashboardPage() {\n  return <section><h2>管理端仪表盘</h2><p>展示核心运营指标。</p></section>;\n}\n",
-      },
-      {
-        path: "frontend/src/pages/admin/ProductManagePage.tsx",
-        language: "typescript",
-        content:
-          "export function AdminProductManagePage() {\n  return <section><h2>管理端商品管理</h2><p>支持上下架与编辑。</p></section>;\n}\n",
+          "export function DataBoardPage() {\n  return <section><h2>数据看板</h2><p>展示统计图表、趋势指标和业务监控信息。</p></section>;\n}\n",
       }
     );
   }
@@ -707,8 +974,13 @@ async function generateCodeFilesWithRetry(
   );
 
   return {
-    files: normalizeGeneratedFiles(
-      fallbackFiles,
+    files: ensureRunnableProjectFiles(
+      normalizeGeneratedFiles(
+        fallbackFiles,
+        workspace.name,
+        workspace.topic,
+        techStack
+      ),
       workspace.name,
       workspace.topic,
       techStack
@@ -796,12 +1068,19 @@ const worker = new Worker(
           await updateJobProgress(
             jobId,
             20,
-            "生成代码",
-            "正在分析需求并构建代码生成提示词",
+            "读取项目需求",
+            "正在读取需求、技术栈和功能模块",
             codeModelId
           );
 
           const codeModel = await getRuntimeModel(codeModelId);
+          await updateJobProgress(
+            jobId,
+            32,
+            "规划项目结构",
+            "正在规划目录结构与模块边界",
+            codeModelId
+          );
           const codeTaskType: AiTaskType = "CODE_GEN";
           const codeStartAt = Date.now();
           const techStack = workspace.techStack as Record<string, string>;
@@ -815,9 +1094,18 @@ const worker = new Worker(
 
           await updateJobProgress(
             jobId,
+            52,
+            "整理生成结果",
+            `代码草稿生成完成，正在整理可运行工程（${files.length} 个文件）`,
+            codeModelId,
+            { attempts, fallback }
+          );
+
+          await updateJobProgress(
+            jobId,
             60,
-            "保存代码文件",
-            `AI 生成完成，开始保存 ${files.length} 个文件`,
+            "写入项目文件",
+            `开始写入 ${files.length} 个文件`,
             codeModelId,
             { attempts, fallback }
           );
@@ -841,8 +1129,8 @@ const worker = new Worker(
               await updateJobProgress(
                 jobId,
                 saveProgress,
-                "保存代码文件",
-                `已保存 ${i + 1}/${files.length} 个文件`,
+                "写入项目文件",
+                `已写入 ${i + 1}/${files.length} 个文件：${file.path}`,
                 codeModelId,
                 { attempts, fallback }
               );
@@ -967,7 +1255,7 @@ const worker = new Worker(
           await updateJobProgress(
             jobId,
             15,
-            "生成论文",
+            "准备图表素材",
             "正在生成图表资源（架构图 / ER 图 / 用例图）",
             thesisModelId
           );
@@ -990,8 +1278,8 @@ const worker = new Worker(
           await updateJobProgress(
             jobId,
             25,
-            "生成论文",
-            "图表资源已就绪，正在准备章节上下文",
+            "构建写作上下文",
+            "图表资源已就绪，正在整理章节写作上下文",
             thesisModelId
           );
 
@@ -1043,8 +1331,8 @@ ${tablesDesc || "未定义"}
             await updateJobProgress(
               jobId,
               progress,
-              "生成论文",
-              `正在生成章节 ${i + 1}/${chapters.length}：${ch.title}`,
+              "撰写章节",
+              `正在撰写章节 ${i + 1}/${chapters.length}：${ch.title}`,
               thesisModelId,
               { chapterIndex: i + 1, chapterTotal: chapters.length, chapterTitle: ch.title }
             );
@@ -1115,7 +1403,7 @@ ${projectContext}
           await updateJobProgress(
             jobId,
             90,
-            "组装文档",
+            "排版与导出",
             "正在组装 DOCX 并写入图表与表结构",
             thesisModelId
           );
@@ -1158,6 +1446,13 @@ ${projectContext}
           });
 
           const storageKey = `workspaces/${workspaceId}/thesis/毕业论文.docx`;
+          await updateJobProgress(
+            jobId,
+            94,
+            "保存论文文件",
+            "正在保存 DOCX / Markdown 文件",
+            thesisModelId
+          );
           await saveFile(storageKey, docxBuffer);
 
           await db.workspaceFile.upsert({
@@ -1212,8 +1507,8 @@ ${projectContext}
             where: { id: jobId },
             data: {
               result: {
-                stage: "璁烘枃鐢熸垚瀹屾垚",
-                detail: `绔犺妭 ${chapters.length + 2}锛屽浘琛?${diagramResult.svgs.length}锛岃〃缁撴瀯 ${tableSchemas.length}`,
+                stage: "论文生成完成",
+                detail: `章节 ${chapters.length + 2}，图表 ${diagramResult.svgs.length}，表结构 ${tableSchemas.length}`,
                 model: thesisModelId,
                 chapters: chapters.length + 2,
                 diagrams: diagramResult.svgs.length,

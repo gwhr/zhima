@@ -2,6 +2,8 @@ import { db } from "@/lib/db";
 import { error } from "@/lib/api-response";
 import { requireAuth } from "@/lib/auth-helpers";
 import { downloadFile } from "@/lib/storage/oss";
+import { getPlatformConfig } from "@/lib/system-config";
+import { hasUserRecharged } from "@/lib/user-entitlements";
 import type { FileType } from "@prisma/client";
 import JSZip from "jszip";
 
@@ -21,6 +23,23 @@ export async function GET(
   if (!workspace) return error("工作空间不存在", 404);
   if (workspace.userId !== session!.user.id && session!.user.role !== "ADMIN") {
     return error("无权限", 403);
+  }
+  const isAdmin = session!.user.role === "ADMIN";
+
+  if (!isAdmin) {
+    const [platformConfig, recharged] = await Promise.all([
+      getPlatformConfig().catch(() => null),
+      hasUserRecharged(session!.user.id),
+    ]);
+    const requireRechargeForDownload =
+      platformConfig?.requireRechargeForDownload ?? true;
+
+    if (requireRechargeForDownload && !recharged) {
+      return error(
+        "下载完整项目包需先充值一次 Token 点数。你可以先继续预览，充值后可下载全部文件。",
+        403
+      );
+    }
   }
 
   const typeMap: Record<string, FileType[]> = {

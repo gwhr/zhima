@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Loader2, Send, Square } from "lucide-react";
+import { ChatMessage } from "@/components/chat-message";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Send, Loader2 } from "lucide-react";
-import { ChatMessage } from "@/components/chat-message";
 
 interface ChatPanelProps {
   workspaceId: string;
@@ -23,6 +23,7 @@ export function ChatPanel({ workspaceId, files, onFileApplied }: ChatPanelProps)
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     fetch(`/api/workspace/${workspaceId}/messages`)
@@ -51,6 +52,23 @@ export function ChatPanel({ workspaceId, files, onFileApplied }: ChatPanelProps)
 
   useEffect(scrollToBottom, [messages, scrollToBottom]);
 
+  const handleStopGeneration = useCallback(() => {
+    const controller = abortControllerRef.current;
+    if (!controller) return;
+    controller.abort();
+    abortControllerRef.current = null;
+    setIsLoading(false);
+    setMessages((prev) =>
+      prev.map((m, idx) =>
+        idx === prev.length - 1 &&
+        m.role === "assistant" &&
+        m.content.trim().length === 0
+          ? { ...m, content: "已暂停本次生成，你可以继续提问或补充需求。" }
+          : m
+      )
+    );
+  }, []);
+
   async function handleSubmit(e?: React.FormEvent) {
     e?.preventDefault();
     const text = input.trim();
@@ -72,9 +90,12 @@ export function ChatPanel({ workspaceId, files, onFileApplied }: ChatPanelProps)
     ]);
 
     try {
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: abortController.signal,
         body: JSON.stringify({
           messages: [...messages, userMsg].map((m) => ({
             role: m.role,
@@ -107,7 +128,17 @@ export function ChatPanel({ workspaceId, files, onFileApplied }: ChatPanelProps)
           )
         );
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId && m.content.trim().length === 0
+              ? { ...m, content: "已暂停本次生成，你可以继续提问或补充需求。" }
+              : m
+          )
+        );
+        return;
+      }
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantId
@@ -115,17 +146,21 @@ export function ChatPanel({ workspaceId, files, onFileApplied }: ChatPanelProps)
             : m
         )
       );
+    } finally {
+      abortControllerRef.current = null;
+      setIsLoading(false);
     }
-
-    setIsLoading(false);
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+    <div className="flex h-full min-h-0 flex-col">
+      <div
+        ref={scrollRef}
+        className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 md:p-5"
+      >
         {messages.length === 0 && (
-          <p className="text-center text-muted-foreground mt-20 text-sm">
-            开始和 AI 对话，描述你的需求
+          <p className="mt-20 text-center text-sm text-muted-foreground">
+            开始和 AI 对话，描述你的需求。
           </p>
         )}
         {messages.map((msg) => (
@@ -145,13 +180,16 @@ export function ChatPanel({ workspaceId, files, onFileApplied }: ChatPanelProps)
         )}
       </div>
 
-      <form onSubmit={handleSubmit} className="border-t p-4 flex gap-2">
+      <form
+        onSubmit={handleSubmit}
+        className="flex gap-2 border-t bg-background/95 p-4 backdrop-blur-sm"
+      >
         <Textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="输入你的需求..."
-          rows={2}
-          className="resize-none"
+          rows={3}
+          className="max-h-44 min-h-[88px] resize-none"
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -159,9 +197,21 @@ export function ChatPanel({ workspaceId, files, onFileApplied }: ChatPanelProps)
             }
           }}
         />
-        <Button type="submit" size="icon" disabled={isLoading || !input.trim()}>
-          <Send className="h-4 w-4" />
-        </Button>
+        {isLoading ? (
+          <Button
+            type="button"
+            size="icon"
+            variant="destructive"
+            onClick={handleStopGeneration}
+            title="暂停生成"
+          >
+            <Square className="h-4 w-4" />
+          </Button>
+        ) : (
+          <Button type="submit" size="icon" disabled={!input.trim()}>
+            <Send className="h-4 w-4" />
+          </Button>
+        )}
       </form>
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   Dialog,
   DialogContent,
@@ -22,6 +22,9 @@ import {
   MonitorSmartphone,
   RefreshCw,
   Info,
+  Timer,
+  Rocket,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -30,6 +33,38 @@ interface FileItem {
   path: string;
   type: string;
   size: number;
+}
+
+interface RuntimePreviewJobView {
+  id: string;
+  status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
+  progress: number;
+  stage: string | null;
+  detail: string | null;
+  queuePosition: number;
+  queueTotal: number;
+  sessionStartedAt: string | null;
+  sessionExpiresAt: string | null;
+  remainingSeconds: number;
+  previewUrl: string | null;
+  createdAt: string;
+}
+
+interface RuntimePreviewStatusView {
+  runtimeSeconds: number;
+  maxConcurrent: number;
+  queuePending: number;
+  queueRunning: number;
+  hasCodeFiles: boolean;
+  hasRecharge: boolean;
+  freeTrialLimit: number | null;
+  freeTrialUsed: number;
+  freeTrialRemaining: number | null;
+  canStart: boolean;
+  blockedReason: string | null;
+  currentJob: RuntimePreviewJobView | null;
+  accepted?: boolean;
+  message?: string;
 }
 
 interface CodePreviewDialogProps {
@@ -42,10 +77,24 @@ interface CodePreviewDialogProps {
 function getLanguage(path: string): string {
   const ext = path.split(".").pop()?.toLowerCase() || "";
   const langMap: Record<string, string> = {
-    java: "java", js: "javascript", ts: "typescript", tsx: "typescript",
-    jsx: "javascript", vue: "vue", html: "html", css: "css", xml: "xml",
-    yml: "yaml", yaml: "yaml", json: "json", sql: "sql", md: "markdown",
-    py: "python", properties: "properties", txt: "text", text: "text",
+    java: "java",
+    js: "javascript",
+    ts: "typescript",
+    tsx: "typescript",
+    jsx: "javascript",
+    vue: "vue",
+    html: "html",
+    css: "css",
+    xml: "xml",
+    yml: "yaml",
+    yaml: "yaml",
+    json: "json",
+    sql: "sql",
+    md: "markdown",
+    py: "python",
+    properties: "properties",
+    txt: "text",
+    text: "text",
     plaintext: "text",
   };
   return langMap[ext] || "text";
@@ -55,6 +104,26 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatCountdown(seconds: number) {
+  const safe = Math.max(0, seconds);
+  const min = Math.floor(safe / 60);
+  const sec = safe % 60;
+  return `${min}m ${String(sec).padStart(2, "0")}s`;
+}
+
+function classifyCodeFile(
+  filePath: string
+): "backend" | "frontend" | "sql" | "docs" | "other" {
+  const path = filePath.toLowerCase();
+  if (path.endsWith(".sql") || path.includes("/sql/") || path.startsWith("sql/")) {
+    return "sql";
+  }
+  if (path.startsWith("backend/")) return "backend";
+  if (path.startsWith("frontend/")) return "frontend";
+  if (path.startsWith("docs/") || path.endsWith(".md")) return "docs";
+  return "other";
 }
 
 export function CodePreviewDialog({
@@ -71,24 +140,46 @@ export function CodePreviewDialog({
   const [previewKey, setPreviewKey] = useState(0);
   const [previewLoading, setPreviewLoading] = useState(true);
 
-  const codeFiles = files.filter((f) => f.type === "CODE");
-  const thesisFiles = files.filter((f) => f.type === "THESIS");
-  const chartFiles = files.filter((f) => f.type === "CHART");
-  const classifyCodeFile = (filePath: string): "backend" | "frontend" | "sql" | "docs" | "other" => {
-    const path = filePath.toLowerCase();
-    if (path.endsWith(".sql") || path.includes("/sql/") || path.startsWith("sql/")) {
-      return "sql";
+  const [runtimeStatus, setRuntimeStatus] = useState<RuntimePreviewStatusView | null>(null);
+  const [runtimeLoading, setRuntimeLoading] = useState(false);
+  const [runtimeStarting, setRuntimeStarting] = useState(false);
+  const [runtimeMessage, setRuntimeMessage] = useState<string | null>(null);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
+
+  const codeFiles = useMemo(() => files.filter((f) => f.type === "CODE"), [files]);
+  const thesisFiles = useMemo(() => files.filter((f) => f.type === "THESIS"), [files]);
+  const chartFiles = useMemo(() => files.filter((f) => f.type === "CHART"), [files]);
+
+  const backendCodeFiles = useMemo(
+    () => codeFiles.filter((f) => classifyCodeFile(f.path) === "backend"),
+    [codeFiles]
+  );
+  const frontendCodeFiles = useMemo(
+    () => codeFiles.filter((f) => classifyCodeFile(f.path) === "frontend"),
+    [codeFiles]
+  );
+  const sqlCodeFiles = useMemo(
+    () => codeFiles.filter((f) => classifyCodeFile(f.path) === "sql"),
+    [codeFiles]
+  );
+  const docsCodeFiles = useMemo(
+    () => codeFiles.filter((f) => classifyCodeFile(f.path) === "docs"),
+    [codeFiles]
+  );
+  const otherCodeFiles = useMemo(
+    () => codeFiles.filter((f) => classifyCodeFile(f.path) === "other"),
+    [codeFiles]
+  );
+
+  const runtimeJob = runtimeStatus?.currentJob ?? null;
+  const runtimeActive = runtimeJob?.status === "PENDING" || runtimeJob?.status === "RUNNING";
+
+  const runtimeIframeSrc = useMemo(() => {
+    if (runtimeJob && runtimeActive) {
+      return `/api/workspace/${workspaceId}/preview-build?runtime=1&jobId=${runtimeJob.id}`;
     }
-    if (path.startsWith("backend/")) return "backend";
-    if (path.startsWith("frontend/")) return "frontend";
-    if (path.startsWith("docs/") || path.endsWith(".md")) return "docs";
-    return "other";
-  };
-  const backendCodeFiles = codeFiles.filter((f) => classifyCodeFile(f.path) === "backend");
-  const frontendCodeFiles = codeFiles.filter((f) => classifyCodeFile(f.path) === "frontend");
-  const sqlCodeFiles = codeFiles.filter((f) => classifyCodeFile(f.path) === "sql");
-  const docsCodeFiles = codeFiles.filter((f) => classifyCodeFile(f.path) === "docs");
-  const otherCodeFiles = codeFiles.filter((f) => classifyCodeFile(f.path) === "other");
+    return `/api/workspace/${workspaceId}/preview-build`;
+  }, [runtimeActive, runtimeJob, workspaceId]);
 
   const loadFileContent = useCallback(
     async (fileId: string) => {
@@ -106,6 +197,27 @@ export function CodePreviewDialog({
     [workspaceId]
   );
 
+  const loadRuntimeStatus = useCallback(
+    async (silent = false) => {
+      if (!silent) setRuntimeLoading(true);
+      try {
+        const res = await fetch(`/api/workspace/${workspaceId}/runtime-preview`);
+        const result = await res.json().catch(() => null);
+        if (!res.ok || !result?.success) {
+          throw new Error(result?.error || "运行预览状态获取失败");
+        }
+        setRuntimeStatus(result.data as RuntimePreviewStatusView);
+        setRuntimeMessage(null);
+        setRuntimeError(null);
+      } catch (err) {
+        setRuntimeError(err instanceof Error ? err.message : "运行预览状态获取失败");
+      } finally {
+        if (!silent) setRuntimeLoading(false);
+      }
+    },
+    [workspaceId]
+  );
+
   useEffect(() => {
     if (open && files.length > 0 && !selectedFileId) {
       const first =
@@ -116,7 +228,7 @@ export function CodePreviewDialog({
         otherCodeFiles[0] ||
         files[0];
       setSelectedFileId(first.id);
-      loadFileContent(first.id);
+      void loadFileContent(first.id);
     }
   }, [
     open,
@@ -134,24 +246,62 @@ export function CodePreviewDialog({
     if (!open) {
       setSelectedFileId(null);
       setFileContent("");
+      setRuntimeMessage(null);
+      setRuntimeError(null);
+      setRuntimeStatus(null);
+      return;
     }
-  }, [open]);
+    if (activeTab === "preview") {
+      setPreviewLoading(true);
+      void loadRuntimeStatus();
+    }
+  }, [open, activeTab, loadRuntimeStatus]);
 
   useEffect(() => {
-    if (open && activeTab === "preview") {
-      setPreviewLoading(true);
-    }
-  }, [open, activeTab]);
+    if (!open || activeTab !== "preview") return;
+    const timer = setInterval(() => {
+      void loadRuntimeStatus(true);
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [open, activeTab, loadRuntimeStatus]);
+
+  useEffect(() => {
+    setPreviewLoading(true);
+  }, [runtimeIframeSrc, previewKey]);
 
   function handleSelectFile(file: FileItem) {
     setSelectedFileId(file.id);
-    loadFileContent(file.id);
+    void loadFileContent(file.id);
   }
 
   async function handleCopy() {
     await navigator.clipboard.writeText(fileContent);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  }
+
+  async function handleStartRuntimePreview() {
+    setRuntimeStarting(true);
+    setRuntimeError(null);
+    setRuntimeMessage(null);
+    try {
+      const response = await fetch(`/api/workspace/${workspaceId}/runtime-preview`, {
+        method: "POST",
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || "启动运行预览失败");
+      }
+
+      const data = result.data as RuntimePreviewStatusView;
+      setRuntimeStatus(data);
+      if (data.message) setRuntimeMessage(data.message);
+      setPreviewKey((k) => k + 1);
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : "启动运行预览失败");
+    } finally {
+      setRuntimeStarting(false);
+    }
   }
 
   const selectedFile = files.find((f) => f.id === selectedFileId);
@@ -258,9 +408,7 @@ export function CodePreviewDialog({
               {selectedFile && (
                 <div className="flex items-center justify-between px-4 py-2 border-b bg-muted/30 shrink-0">
                   <div className="flex items-center gap-2 min-w-0">
-                    <code className="text-xs font-mono truncate">
-                      {selectedFile.path}
-                    </code>
+                    <code className="text-xs font-mono truncate">{selectedFile.path}</code>
                     <Badge variant="outline" className="text-[10px] shrink-0">
                       {getLanguage(selectedFile.path)}
                     </Badge>
@@ -273,9 +421,15 @@ export function CodePreviewDialog({
                     disabled={!fileContent || loadingContent}
                   >
                     {copied ? (
-                      <><Check className="mr-1 h-3 w-3" /> 已复制</>
+                      <>
+                        <Check className="mr-1 h-3 w-3" />
+                        已复制
+                      </>
                     ) : (
-                      <><Copy className="mr-1 h-3 w-3" /> 复制</>
+                      <>
+                        <Copy className="mr-1 h-3 w-3" />
+                        复制
+                      </>
                     )}
                   </Button>
                 </div>
@@ -295,46 +449,153 @@ export function CodePreviewDialog({
           </div>
         ) : (
           <div className="flex-1 flex flex-col min-h-0">
-            <div className="flex items-center justify-between px-4 py-2 border-b bg-muted/30 shrink-0">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <MonitorSmartphone className="h-3.5 w-3.5" />
-                <span>项目界面效果预览 · 展示完整交互流程与页面布局</span>
+            <div className="px-4 py-3 border-b bg-muted/30 shrink-0 space-y-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <MonitorSmartphone className="h-3.5 w-3.5" />
+                  <span>运行预览（可排队，限时会话）</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => void loadRuntimeStatus()}
+                    disabled={runtimeLoading || runtimeStarting}
+                  >
+                    <RefreshCw className={cn("mr-1 h-3 w-3", runtimeLoading && "animate-spin")} />
+                    刷新状态
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => void handleStartRuntimePreview()}
+                    disabled={
+                      runtimeStarting ||
+                      runtimeLoading ||
+                      !runtimeStatus?.hasCodeFiles ||
+                      (!!runtimeJob && runtimeActive) ||
+                      (!runtimeStatus?.canStart && !runtimeActive)
+                    }
+                  >
+                    {runtimeStarting ? (
+                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                    ) : (
+                      <Rocket className="mr-1 h-3 w-3" />
+                    )}
+                    {runtimeJob?.status === "RUNNING"
+                      ? "运行中"
+                      : runtimeJob?.status === "PENDING"
+                      ? "排队中"
+                      : "启动运行预览"}
+                  </Button>
+                </div>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => {
-                  setPreviewLoading(true);
-                  setPreviewKey((k) => k + 1);
-                }}
-              >
-                <RefreshCw className="mr-1 h-3 w-3" />
-                刷新
-              </Button>
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-xs">
+                <div className="rounded-md border bg-white px-2.5 py-2 flex items-center justify-between">
+                  <span className="text-muted-foreground">并发上限</span>
+                  <span className="font-medium">
+                    {runtimeStatus?.queueRunning ?? 0}/{runtimeStatus?.maxConcurrent ?? 1}
+                  </span>
+                </div>
+                <div className="rounded-md border bg-white px-2.5 py-2 flex items-center justify-between">
+                  <span className="text-muted-foreground">排队人数</span>
+                  <span className="font-medium">{runtimeStatus?.queuePending ?? 0}</span>
+                </div>
+                <div className="rounded-md border bg-white px-2.5 py-2 flex items-center justify-between">
+                  <span className="text-muted-foreground">单次时长</span>
+                  <span className="font-medium">
+                    {Math.max(1, Math.ceil((runtimeStatus?.runtimeSeconds ?? 0) / 60))} 分钟
+                  </span>
+                </div>
+                <div className="rounded-md border bg-white px-2.5 py-2 flex items-center justify-between">
+                  <span className="text-muted-foreground">免费次数</span>
+                  <span className="font-medium">
+                    {runtimeStatus?.freeTrialLimit === null
+                      ? "无限制"
+                      : `${runtimeStatus?.freeTrialRemaining ?? 0}/${runtimeStatus?.freeTrialLimit ?? 0}`}
+                  </span>
+                </div>
+              </div>
+
+              {runtimeJob && (
+                <div
+                  className={cn(
+                    "rounded-md border px-3 py-2 text-xs",
+                    runtimeJob.status === "RUNNING"
+                      ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                      : runtimeJob.status === "PENDING"
+                      ? "bg-amber-50 border-amber-200 text-amber-700"
+                      : "bg-slate-50 border-slate-200 text-slate-700"
+                  )}
+                >
+                  <div className="flex items-center gap-2 font-medium">
+                    {runtimeJob.status === "RUNNING" ? (
+                      <>
+                        <Timer className="h-3.5 w-3.5" />
+                        正在运行 · 剩余 {formatCountdown(runtimeJob.remainingSeconds)}
+                      </>
+                    ) : runtimeJob.status === "PENDING" ? (
+                      <>
+                        <Users className="h-3.5 w-3.5" />
+                        排队中 · 当前第 {runtimeJob.queuePosition} 位（共 {runtimeJob.queueTotal}）
+                      </>
+                    ) : (
+                      "上次运行会话已结束"
+                    )}
+                  </div>
+                  {(runtimeJob.stage || runtimeJob.detail) && (
+                    <p className="mt-1 leading-relaxed opacity-90">
+                      {[runtimeJob.stage, runtimeJob.detail].filter(Boolean).join(" · ")}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {runtimeMessage && (
+                <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                  {runtimeMessage}
+                </div>
+              )}
+
+              {runtimeStatus?.blockedReason && !runtimeActive && (
+                <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                  {runtimeStatus.blockedReason}
+                </div>
+              )}
+
+              {runtimeError && (
+                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                  {runtimeError}
+                </div>
+              )}
             </div>
+
             <div className="flex-1 relative">
               {previewLoading && (
                 <div className="absolute inset-0 flex items-center justify-center bg-white z-10">
                   <div className="flex flex-col items-center gap-3">
                     <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
-                    <p className="text-sm text-muted-foreground">正在构建预览...</p>
+                    <p className="text-sm text-muted-foreground">正在加载预览...</p>
                   </div>
                 </div>
               )}
               <iframe
-                key={previewKey}
-                src={`/api/workspace/${workspaceId}/preview-build`}
+                key={`${runtimeIframeSrc}:${previewKey}`}
+                src={runtimeIframeSrc}
                 className="w-full h-full border-0"
                 sandbox="allow-scripts"
                 onLoad={() => setPreviewLoading(false)}
                 title="项目运行预览"
               />
             </div>
+
             <div className="shrink-0 border-t bg-blue-50/80 px-4 py-2.5 flex items-start gap-2">
               <Info className="h-3.5 w-3.5 text-blue-500 mt-0.5 shrink-0" />
               <p className="text-xs text-blue-700/80 leading-relaxed">
-                当前为界面效果演示，使用预置示例数据呈现系统完整功能与交互流程。下载项目后，按照本地部署指南完成数据库初始化，系统将自动连接您配置的真实数据源。
+                运行预览用于给小白用户快速看到效果。为保障共享资源，系统会做并发排队与限时回收。若要长期运行，
+                请下载完整代码到本地或服务器部署。
               </p>
             </div>
           </div>

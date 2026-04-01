@@ -2,6 +2,8 @@ import { db } from "@/lib/db";
 import { success, error } from "@/lib/api-response";
 import { requireAuth } from "@/lib/auth-helpers";
 import { deleteFile } from "@/lib/storage/oss";
+import { getPlatformConfig } from "@/lib/system-config";
+import { hasUserRecharged } from "@/lib/user-entitlements";
 
 export async function GET(
   _req: Request,
@@ -33,7 +35,27 @@ export async function GET(
     return error("无权限", 403);
   }
 
-  return success(workspace);
+  const [platformConfig, recharged] = await Promise.all([
+    getPlatformConfig().catch(() => null),
+    hasUserRecharged(session!.user.id),
+  ]);
+
+  return success({
+    workspace,
+    platformPolicy: {
+      freeWorkspaceLimit: platformConfig?.freeWorkspaceLimit ?? 3,
+      requireRechargeForDownload:
+        platformConfig?.requireRechargeForDownload ?? true,
+      supportContactEnabled: platformConfig?.supportContactEnabled ?? false,
+      supportContactTitle:
+        platformConfig?.supportContactTitle || "一对一辅导（人工）",
+      supportContactDescription:
+        platformConfig?.supportContactDescription ||
+        "可联系客服获取选题把关、部署排错、答辩材料梳理等一对一支持。",
+      supportContactQrUrl: platformConfig?.supportContactQrUrl || "",
+      hasRecharged: recharged,
+    },
+  });
 }
 
 export async function DELETE(

@@ -19,11 +19,7 @@ type ModelProviderView = {
   zhipuBaseUrl: string;
 };
 
-type ModelOptionDetail = {
-  id: string;
-  name: string;
-  source: "builtin" | "custom";
-};
+type ModelOptionDetail = { id: string; name: string; source: "builtin" | "custom" };
 
 type BuiltinPricingRow = {
   id: string;
@@ -46,46 +42,36 @@ type CustomOpenAIModelView = {
   apiKeySource: "admin" | "none";
 };
 
-type CustomOpenAIModelForm = {
+type CustomOpenAIModelForm = CustomOpenAIModelView & {
   localId: string;
-  id: string;
-  name: string;
-  modelName: string;
-  baseUrl: string;
-  inputCostPerMToken: number;
-  outputCostPerMToken: number;
-  cacheHitCostPerMToken: number;
-  enabled: boolean;
   apiKey: string;
-  apiKeyMasked: string;
-  apiKeySource: "admin" | "none";
 };
 
 type ModelsResponse = {
   modelOptions: string[];
   modelOptionDetails?: ModelOptionDetail[];
   builtinPricing?: BuiltinPricingRow[];
-  config: {
-    codeGenModelId: string;
-    thesisGenModelId: string;
-  };
+  config: { codeGenModelId: string; thesisGenModelId: string };
   providers: ModelProviderView;
   customOpenAIModels?: CustomOpenAIModelView[];
 };
 
-type TestStatus = {
-  ok: boolean;
-  text: string;
-};
+type TestStatus = { ok: boolean; text: string };
 
-function sourceText(source: KeySource) {
+function keySourceText(source: KeySource) {
   if (source === "admin") return "后台配置";
   if (source === "env") return "环境变量";
   return "未配置";
 }
 
-function customSourceText(source: "admin" | "none") {
+function customKeySourceText(source: "admin" | "none") {
   return source === "admin" ? "后台已保存" : "未配置";
+}
+
+function parseNonNegativeNumber(value: string): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return n;
 }
 
 function toCustomFormModel(item?: Partial<CustomOpenAIModelView>): CustomOpenAIModelForm {
@@ -95,14 +81,9 @@ function toCustomFormModel(item?: Partial<CustomOpenAIModelView>): CustomOpenAIM
     name: item?.name || "",
     modelName: item?.modelName || "",
     baseUrl: item?.baseUrl || "https://api.openai.com/v1",
-    inputCostPerMToken:
-      typeof item?.inputCostPerMToken === "number" ? item.inputCostPerMToken : 0,
-    outputCostPerMToken:
-      typeof item?.outputCostPerMToken === "number" ? item.outputCostPerMToken : 0,
-    cacheHitCostPerMToken:
-      typeof item?.cacheHitCostPerMToken === "number"
-        ? item.cacheHitCostPerMToken
-        : 0,
+    inputCostPerMToken: item?.inputCostPerMToken ?? 0,
+    outputCostPerMToken: item?.outputCostPerMToken ?? 0,
+    cacheHitCostPerMToken: item?.cacheHitCostPerMToken ?? 0,
     enabled: item?.enabled !== false,
     apiKey: "",
     apiKeyMasked: item?.apiKeyMasked || "未配置",
@@ -115,18 +96,14 @@ export default function AdminModelsPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [testingTarget, setTestingTarget] = useState<string | null>(null);
-  const [testStatusMap, setTestStatusMap] = useState<Record<string, TestStatus>>(
-    {}
-  );
+  const [testStatusMap, setTestStatusMap] = useState<Record<string, TestStatus>>({});
 
   const [modelOptions, setModelOptions] = useState<ModelOptionDetail[]>([]);
   const [builtinPricing, setBuiltinPricing] = useState<BuiltinPricingRow[]>([]);
   const [codeGenModelId, setCodeGenModelId] = useState("");
   const [thesisGenModelId, setThesisGenModelId] = useState("");
   const [providers, setProviders] = useState<ModelProviderView | null>(null);
-  const [customOpenAIModels, setCustomOpenAIModels] = useState<
-    CustomOpenAIModelForm[]
-  >([]);
+  const [customOpenAIModels, setCustomOpenAIModels] = useState<CustomOpenAIModelForm[]>([]);
 
   const [anthropicApiKey, setAnthropicApiKey] = useState("");
   const [deepseekApiKey, setDeepseekApiKey] = useState("");
@@ -134,50 +111,59 @@ export default function AdminModelsPage() {
   const [deepseekBaseUrl, setDeepseekBaseUrl] = useState("");
   const [zhipuBaseUrl, setZhipuBaseUrl] = useState("");
 
+  const optionLabel = useMemo(
+    () =>
+      new Map(
+        modelOptions.map((item) => [
+          item.id,
+          item.source === "custom" ? `${item.name} (${item.id})` : item.name,
+        ])
+      ),
+    [modelOptions]
+  );
+
   async function loadData() {
     setLoading(true);
     setMessage(null);
-    const response = await fetch("/api/admin/models");
-    const result = await response.json();
-    if (!result.success) {
-      setLoading(false);
-      setMessage(result.error || "加载模型配置失败");
-      return;
-    }
-
-    const data = result.data as ModelsResponse;
-    const options =
-      data.modelOptionDetails && data.modelOptionDetails.length > 0
+    try {
+      const response = await fetch("/api/admin/models");
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.success || !result?.data) {
+        throw new Error(result?.error || `加载失败（HTTP ${response.status}）`);
+      }
+      const data = result.data as ModelsResponse;
+      const options = data.modelOptionDetails?.length
         ? data.modelOptionDetails
-        : (data.modelOptions || []).map((id) => ({
-            id,
-            name: id,
-            source: "builtin" as const,
-          }));
+        : (data.modelOptions || []).map((id) => ({ id, name: id, source: "builtin" as const }));
 
-    setModelOptions(options);
-    setBuiltinPricing(data.builtinPricing || []);
-    setCodeGenModelId(data.config.codeGenModelId);
-    setThesisGenModelId(data.config.thesisGenModelId);
-    setProviders(data.providers);
-    setDeepseekBaseUrl(data.providers.deepseekBaseUrl);
-    setZhipuBaseUrl(data.providers.zhipuBaseUrl);
-    setCustomOpenAIModels(
-      (data.customOpenAIModels || []).map((item) => toCustomFormModel(item))
-    );
-    setLoading(false);
+      setModelOptions(options);
+      setBuiltinPricing(data.builtinPricing || []);
+      setCodeGenModelId(data.config.codeGenModelId);
+      setThesisGenModelId(data.config.thesisGenModelId);
+      setProviders(data.providers);
+      setDeepseekBaseUrl(data.providers.deepseekBaseUrl);
+      setZhipuBaseUrl(data.providers.zhipuBaseUrl);
+      setCustomOpenAIModels((data.customOpenAIModels || []).map((x) => toCustomFormModel(x)));
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "加载失败");
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
     void loadData();
   }, []);
 
-  const payloadPreview = useMemo(() => {
-    const payload: Record<string, unknown> = {
+  const payloadPreview = useMemo(
+    () => ({
       codeGenModelId,
       thesisGenModelId,
       deepseekBaseUrl: deepseekBaseUrl.trim(),
       zhipuBaseUrl: zhipuBaseUrl.trim(),
+      anthropicApiKey: anthropicApiKey.trim(),
+      deepseekApiKey: deepseekApiKey.trim(),
+      zhipuApiKey: zhipuApiKey.trim(),
       customOpenAIModels: customOpenAIModels.map((item) => ({
         id: item.id.trim().toLowerCase(),
         name: item.name.trim(),
@@ -189,23 +175,18 @@ export default function AdminModelsPage() {
         enabled: item.enabled,
         apiKey: item.apiKey.trim(),
       })),
-    };
-
-    if (anthropicApiKey.trim()) payload.anthropicApiKey = anthropicApiKey.trim();
-    if (deepseekApiKey.trim()) payload.deepseekApiKey = deepseekApiKey.trim();
-    if (zhipuApiKey.trim()) payload.zhipuApiKey = zhipuApiKey.trim();
-
-    return payload;
-  }, [
-    anthropicApiKey,
-    codeGenModelId,
-    customOpenAIModels,
-    deepseekApiKey,
-    deepseekBaseUrl,
-    thesisGenModelId,
-    zhipuApiKey,
-    zhipuBaseUrl,
-  ]);
+    }),
+    [
+      codeGenModelId,
+      thesisGenModelId,
+      deepseekBaseUrl,
+      zhipuBaseUrl,
+      anthropicApiKey,
+      deepseekApiKey,
+      zhipuApiKey,
+      customOpenAIModels,
+    ]
+  );
 
   async function save() {
     setSaving(true);
@@ -216,17 +197,18 @@ export default function AdminModelsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payloadPreview),
       });
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error(result.error || "保存失败");
+      const raw = await response.text();
+      const result = raw ? (JSON.parse(raw) as { success?: boolean; error?: string }) : null;
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || raw || `保存失败（HTTP ${response.status}）`);
       }
       setAnthropicApiKey("");
       setDeepseekApiKey("");
       setZhipuApiKey("");
       setMessage("模型配置已保存");
       await loadData();
-    } catch (saveError) {
-      setMessage(saveError instanceof Error ? saveError.message : "保存失败");
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "保存失败");
     } finally {
       setSaving(false);
     }
@@ -246,13 +228,8 @@ export default function AdminModelsPage() {
     setTestingTarget(stateKey);
     setTestStatus(stateKey, null);
     try {
-      const payload: Record<string, unknown> = {
-        kind: "builtin",
-        modelId,
-      };
-      if (modelId === "opus" && anthropicApiKey.trim()) {
-        payload.anthropicApiKey = anthropicApiKey.trim();
-      }
+      const payload: Record<string, unknown> = { kind: "builtin", modelId };
+      if (modelId === "opus" && anthropicApiKey.trim()) payload.anthropicApiKey = anthropicApiKey.trim();
       if (modelId === "deepseek") {
         if (deepseekApiKey.trim()) payload.deepseekApiKey = deepseekApiKey.trim();
         payload.deepseekBaseUrl = deepseekBaseUrl.trim();
@@ -261,31 +238,16 @@ export default function AdminModelsPage() {
         if (zhipuApiKey.trim()) payload.zhipuApiKey = zhipuApiKey.trim();
         payload.zhipuBaseUrl = zhipuBaseUrl.trim();
       }
-
       const response = await fetch("/api/admin/models/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       const result = await response.json().catch(() => null);
-      if (!response.ok || !result?.success) {
-        throw new Error(result?.error || "连接测试失败");
-      }
-
-      const data = result.data || {};
-      const latency = Number.isFinite(Number(data.latencyMs))
-        ? `${Math.round(Number(data.latencyMs))}ms`
-        : "-";
-      const preview = typeof data.preview === "string" ? data.preview : "";
-      setTestStatus(stateKey, {
-        ok: true,
-        text: `连接成功，耗时 ${latency}${preview ? `，返回：${preview}` : ""}`,
-      });
-    } catch (testError) {
-      setTestStatus(stateKey, {
-        ok: false,
-        text: testError instanceof Error ? testError.message : "连接测试失败",
-      });
+      if (!response.ok || !result?.success) throw new Error(result?.error || "连接测试失败");
+      setTestStatus(stateKey, { ok: true, text: "连接成功" });
+    } catch (e) {
+      setTestStatus(stateKey, { ok: false, text: e instanceof Error ? e.message : "连接测试失败" });
     } finally {
       setTestingTarget(null);
     }
@@ -303,31 +265,16 @@ export default function AdminModelsPage() {
         baseUrl: item.baseUrl.trim(),
       };
       if (item.apiKey.trim()) payload.apiKey = item.apiKey.trim();
-
       const response = await fetch("/api/admin/models/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       const result = await response.json().catch(() => null);
-      if (!response.ok || !result?.success) {
-        throw new Error(result?.error || "连接测试失败");
-      }
-
-      const data = result.data || {};
-      const latency = Number.isFinite(Number(data.latencyMs))
-        ? `${Math.round(Number(data.latencyMs))}ms`
-        : "-";
-      const preview = typeof data.preview === "string" ? data.preview : "";
-      setTestStatus(stateKey, {
-        ok: true,
-        text: `连接成功，耗时 ${latency}${preview ? `，返回：${preview}` : ""}`,
-      });
-    } catch (testError) {
-      setTestStatus(stateKey, {
-        ok: false,
-        text: testError instanceof Error ? testError.message : "连接测试失败",
-      });
+      if (!response.ok || !result?.success) throw new Error(result?.error || "连接测试失败");
+      setTestStatus(stateKey, { ok: true, text: "连接成功" });
+    } catch (e) {
+      setTestStatus(stateKey, { ok: false, text: e instanceof Error ? e.message : "连接测试失败" });
     } finally {
       setTestingTarget(null);
     }
@@ -338,30 +285,15 @@ export default function AdminModelsPage() {
   }
 
   function removeCustomOpenAIModel(localId: string) {
-    const statusKey = `custom:${localId}`;
-    setTestStatus(statusKey, null);
     setCustomOpenAIModels((prev) => prev.filter((item) => item.localId !== localId));
+    setTestStatus(`custom:${localId}`, null);
   }
 
-  function updateCustomOpenAIModel(
-    localId: string,
-    patch: Partial<CustomOpenAIModelForm>
-  ) {
+  function updateCustomOpenAIModel(localId: string, patch: Partial<CustomOpenAIModelForm>) {
     setCustomOpenAIModels((prev) =>
       prev.map((item) => (item.localId === localId ? { ...item, ...patch } : item))
     );
   }
-
-  const optionLabel = useMemo(
-    () =>
-      new Map(
-        modelOptions.map((item) => [
-          item.id,
-          item.source === "custom" ? `${item.name}（${item.id}）` : item.name,
-        ])
-      ),
-    [modelOptions]
-  );
 
   if (loading || !providers) {
     return (
@@ -389,33 +321,98 @@ export default function AdminModelsPage() {
                 <th className="px-2 py-3 text-right font-medium">输入单价</th>
                 <th className="px-2 py-3 text-right font-medium">输出单价</th>
                 <th className="px-2 py-3 text-right font-medium">缓存命中单价</th>
+                <th className="px-2 py-3 text-center font-medium">启用</th>
               </tr>
             </thead>
             <tbody>
               {builtinPricing.map((item) => (
-                <tr key={item.id} className="border-b last:border-0">
+                <tr key={item.id} className="border-b">
                   <td className="px-2 py-3">{item.name}</td>
                   <td className="px-2 py-3 font-mono text-xs">{item.id}</td>
-                  <td className="px-2 py-3 text-right tabular-nums">
-                    {item.inputCostPerMToken.toFixed(6)}
+                  <td className="px-2 py-3 text-right tabular-nums">{item.inputCostPerMToken.toFixed(6)}</td>
+                  <td className="px-2 py-3 text-right tabular-nums">{item.outputCostPerMToken.toFixed(6)}</td>
+                  <td className="px-2 py-3 text-right tabular-nums">{item.cacheHitCostPerMToken.toFixed(6)}</td>
+                  <td className="px-2 py-3 text-center text-muted-foreground">内置</td>
+                </tr>
+              ))}
+
+              {customOpenAIModels.map((item, index) => (
+                <tr key={item.localId} className="border-b last:border-0 bg-muted/10">
+                  <td className="px-2 py-2">
+                    <Input
+                      value={item.name}
+                      onChange={(event) =>
+                        updateCustomOpenAIModel(item.localId, { name: event.target.value })
+                      }
+                      placeholder={`自定义模型 #${index + 1}`}
+                    />
                   </td>
-                  <td className="px-2 py-3 text-right tabular-nums">
-                    {item.outputCostPerMToken.toFixed(6)}
+                  <td className="px-2 py-2 font-mono text-xs">{item.id || "-"}</td>
+                  <td className="px-2 py-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      step="0.000001"
+                      value={item.inputCostPerMToken}
+                      onChange={(event) =>
+                        updateCustomOpenAIModel(item.localId, {
+                          inputCostPerMToken: parseNonNegativeNumber(event.target.value),
+                        })
+                      }
+                    />
                   </td>
-                  <td className="px-2 py-3 text-right tabular-nums">
-                    {item.cacheHitCostPerMToken.toFixed(6)}
+                  <td className="px-2 py-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      step="0.000001"
+                      value={item.outputCostPerMToken}
+                      onChange={(event) =>
+                        updateCustomOpenAIModel(item.localId, {
+                          outputCostPerMToken: parseNonNegativeNumber(event.target.value),
+                        })
+                      }
+                    />
+                  </td>
+                  <td className="px-2 py-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      step="0.000001"
+                      value={item.cacheHitCostPerMToken}
+                      onChange={(event) =>
+                        updateCustomOpenAIModel(item.localId, {
+                          cacheHitCostPerMToken: parseNonNegativeNumber(event.target.value),
+                        })
+                      }
+                    />
+                  </td>
+                  <td className="px-2 py-2 text-center">
+                    <input
+                      type="checkbox"
+                      checked={item.enabled}
+                      onChange={(event) =>
+                        updateCustomOpenAIModel(item.localId, { enabled: event.target.checked })
+                      }
+                    />
                   </td>
                 </tr>
               ))}
-              {builtinPricing.length === 0 && (
+
+              {builtinPricing.length === 0 && customOpenAIModels.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-2 py-6 text-center text-muted-foreground">
-                    暂无内置模型价格
+                  <td colSpan={6} className="px-2 py-6 text-center text-muted-foreground">
+                    暂无模型价格配置
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+          {customOpenAIModels.length > 0 && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              自定义模型已在此显示并可直接编辑，改完后点击底部“保存模型配置”。
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -438,7 +435,6 @@ export default function AdminModelsPage() {
               ))}
             </select>
           </label>
-
           <label className="space-y-1 text-sm">
             <span className="text-muted-foreground">论文生成模型</span>
             <select
@@ -471,14 +467,12 @@ export default function AdminModelsPage() {
                 onClick={() => void testBuiltinModel("opus")}
                 disabled={Boolean(testingTarget && testingTarget !== "builtin:opus")}
               >
-                {testingTarget === "builtin:opus" && (
-                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                )}
+                {testingTarget === "builtin:opus" && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
                 测试连接
               </Button>
             </div>
             <div className="text-xs text-muted-foreground">
-              当前：{providers.anthropicApiKeyMasked}（来源：{sourceText(providers.anthropicApiKeySource)}）
+              当前：{providers.anthropicApiKeyMasked}（来源：{keySourceText(providers.anthropicApiKeySource)}）
             </div>
             <Input
               type="password"
@@ -487,13 +481,7 @@ export default function AdminModelsPage() {
               placeholder="输入新 Key（留空则不修改）"
             />
             {testStatusMap["builtin:opus"] && (
-              <p
-                className={
-                  testStatusMap["builtin:opus"].ok
-                    ? "text-xs text-emerald-600"
-                    : "text-xs text-red-600"
-                }
-              >
+              <p className={testStatusMap["builtin:opus"].ok ? "text-xs text-emerald-600" : "text-xs text-red-600"}>
                 {testStatusMap["builtin:opus"].text}
               </p>
             )}
@@ -507,18 +495,14 @@ export default function AdminModelsPage() {
                 variant="outline"
                 size="sm"
                 onClick={() => void testBuiltinModel("deepseek")}
-                disabled={Boolean(
-                  testingTarget && testingTarget !== "builtin:deepseek"
-                )}
+                disabled={Boolean(testingTarget && testingTarget !== "builtin:deepseek")}
               >
-                {testingTarget === "builtin:deepseek" && (
-                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                )}
+                {testingTarget === "builtin:deepseek" && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
                 测试连接
               </Button>
             </div>
             <div className="text-xs text-muted-foreground">
-              当前：{providers.deepseekApiKeyMasked}（来源：{sourceText(providers.deepseekApiKeySource)}）
+              当前：{providers.deepseekApiKeyMasked}（来源：{keySourceText(providers.deepseekApiKeySource)}）
             </div>
             <Input
               type="password"
@@ -526,19 +510,9 @@ export default function AdminModelsPage() {
               onChange={(event) => setDeepseekApiKey(event.target.value)}
               placeholder="输入新 Key（留空则不修改）"
             />
-            <Input
-              value={deepseekBaseUrl}
-              onChange={(event) => setDeepseekBaseUrl(event.target.value)}
-              placeholder="DeepSeek Base URL"
-            />
+            <Input value={deepseekBaseUrl} onChange={(event) => setDeepseekBaseUrl(event.target.value)} placeholder="DeepSeek Base URL" />
             {testStatusMap["builtin:deepseek"] && (
-              <p
-                className={
-                  testStatusMap["builtin:deepseek"].ok
-                    ? "text-xs text-emerald-600"
-                    : "text-xs text-red-600"
-                }
-              >
+              <p className={testStatusMap["builtin:deepseek"].ok ? "text-xs text-emerald-600" : "text-xs text-red-600"}>
                 {testStatusMap["builtin:deepseek"].text}
               </p>
             )}
@@ -554,14 +528,12 @@ export default function AdminModelsPage() {
                 onClick={() => void testBuiltinModel("glm")}
                 disabled={Boolean(testingTarget && testingTarget !== "builtin:glm")}
               >
-                {testingTarget === "builtin:glm" && (
-                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                )}
+                {testingTarget === "builtin:glm" && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
                 测试连接
               </Button>
             </div>
             <div className="text-xs text-muted-foreground">
-              当前：{providers.zhipuApiKeyMasked}（来源：{sourceText(providers.zhipuApiKeySource)}）
+              当前：{providers.zhipuApiKeyMasked}（来源：{keySourceText(providers.zhipuApiKeySource)}）
             </div>
             <Input
               type="password"
@@ -569,19 +541,9 @@ export default function AdminModelsPage() {
               onChange={(event) => setZhipuApiKey(event.target.value)}
               placeholder="输入新 Key（留空则不修改）"
             />
-            <Input
-              value={zhipuBaseUrl}
-              onChange={(event) => setZhipuBaseUrl(event.target.value)}
-              placeholder="GLM Base URL"
-            />
+            <Input value={zhipuBaseUrl} onChange={(event) => setZhipuBaseUrl(event.target.value)} placeholder="GLM Base URL" />
             {testStatusMap["builtin:glm"] && (
-              <p
-                className={
-                  testStatusMap["builtin:glm"].ok
-                    ? "text-xs text-emerald-600"
-                    : "text-xs text-red-600"
-                }
-              >
+              <p className={testStatusMap["builtin:glm"].ok ? "text-xs text-emerald-600" : "text-xs text-red-600"}>
                 {testStatusMap["builtin:glm"].text}
               </p>
             )}
@@ -595,183 +557,35 @@ export default function AdminModelsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           {customOpenAIModels.map((item, index) => (
-            <div
-              key={item.localId}
-              className="space-y-3 rounded-md border bg-muted/20 p-3"
-            >
+            <div key={item.localId} className="space-y-3 rounded-md border bg-muted/20 p-3">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-medium">自定义模型 #{index + 1}</p>
                 <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void testCustomModel(item)}
-                    disabled={Boolean(
-                      testingTarget && testingTarget !== `custom:${item.localId}`
-                    )}
-                  >
-                    {testingTarget === `custom:${item.localId}` && (
-                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                    )}
+                  <Button type="button" variant="outline" size="sm" onClick={() => void testCustomModel(item)}>
+                    {testingTarget === `custom:${item.localId}` && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
                     测试连接
                   </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeCustomOpenAIModel(item.localId)}
-                  >
+                  <Button type="button" variant="ghost" size="sm" onClick={() => removeCustomOpenAIModel(item.localId)}>
                     <Trash2 className="mr-1 h-4 w-4" />
                     删除
                   </Button>
                 </div>
               </div>
-
               <div className="grid gap-3 md:grid-cols-2">
-                <label className="space-y-1 text-sm">
-                  <span className="text-muted-foreground">模型 ID（唯一）</span>
-                  <Input
-                    value={item.id}
-                    onChange={(event) =>
-                      updateCustomOpenAIModel(item.localId, {
-                        id: event.target.value.toLowerCase(),
-                      })
-                    }
-                    placeholder="如：qwen-plus"
-                  />
-                </label>
-                <label className="space-y-1 text-sm">
-                  <span className="text-muted-foreground">显示名称</span>
-                  <Input
-                    value={item.name}
-                    onChange={(event) =>
-                      updateCustomOpenAIModel(item.localId, {
-                        name: event.target.value,
-                      })
-                    }
-                    placeholder="如：通义千问 Plus"
-                  />
-                </label>
+                <Input value={item.id} onChange={(event) => updateCustomOpenAIModel(item.localId, { id: event.target.value.toLowerCase() })} placeholder="模型 ID（唯一）" />
+                <Input value={item.name} onChange={(event) => updateCustomOpenAIModel(item.localId, { name: event.target.value })} placeholder="显示名称" />
+                <Input value={item.modelName} onChange={(event) => updateCustomOpenAIModel(item.localId, { modelName: event.target.value })} placeholder="底层 Model Name" />
+                <Input value={item.baseUrl} onChange={(event) => updateCustomOpenAIModel(item.localId, { baseUrl: event.target.value })} placeholder="Base URL" />
               </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <label className="space-y-1 text-sm">
-                  <span className="text-muted-foreground">底层 Model Name</span>
-                  <Input
-                    value={item.modelName}
-                    onChange={(event) =>
-                      updateCustomOpenAIModel(item.localId, {
-                        modelName: event.target.value,
-                      })
-                    }
-                    placeholder="如：qwen-plus"
-                  />
-                </label>
-                <label className="space-y-1 text-sm">
-                  <span className="text-muted-foreground">Base URL</span>
-                  <Input
-                    value={item.baseUrl}
-                    onChange={(event) =>
-                      updateCustomOpenAIModel(item.localId, {
-                        baseUrl: event.target.value,
-                      })
-                    }
-                    placeholder="如：https://dashscope.aliyuncs.com/compatible-mode/v1"
-                  />
-                </label>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-3">
-                <label className="space-y-1 text-sm">
-                  <span className="text-muted-foreground">输入单价（元 / 1M tokens）</span>
-                  <Input
-                    type="number"
-                    min={0}
-                    step="0.000001"
-                    value={item.inputCostPerMToken}
-                    onChange={(event) =>
-                      updateCustomOpenAIModel(item.localId, {
-                        inputCostPerMToken: Number(event.target.value || 0),
-                      })
-                    }
-                  />
-                </label>
-                <label className="space-y-1 text-sm">
-                  <span className="text-muted-foreground">输出单价（元 / 1M tokens）</span>
-                  <Input
-                    type="number"
-                    min={0}
-                    step="0.000001"
-                    value={item.outputCostPerMToken}
-                    onChange={(event) =>
-                      updateCustomOpenAIModel(item.localId, {
-                        outputCostPerMToken: Number(event.target.value || 0),
-                      })
-                    }
-                  />
-                </label>
-                <label className="space-y-1 text-sm">
-                  <span className="text-muted-foreground">
-                    缓存命中单价（元 / 1M tokens）
-                  </span>
-                  <Input
-                    type="number"
-                    min={0}
-                    step="0.000001"
-                    value={item.cacheHitCostPerMToken}
-                    onChange={(event) =>
-                      updateCustomOpenAIModel(item.localId, {
-                        cacheHitCostPerMToken: Number(event.target.value || 0),
-                      })
-                    }
-                  />
-                </label>
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-xs text-muted-foreground">
-                  当前 Key：{item.apiKeyMasked}（来源：{customSourceText(item.apiKeySource)}）
-                </p>
-                <Input
-                  type="password"
-                  value={item.apiKey}
-                  onChange={(event) =>
-                    updateCustomOpenAIModel(item.localId, {
-                      apiKey: event.target.value,
-                    })
-                  }
-                  placeholder="输入新 Key（留空则保持已保存 Key）"
-                />
-              </div>
-
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={item.enabled}
-                  onChange={(event) =>
-                    updateCustomOpenAIModel(item.localId, {
-                      enabled: event.target.checked,
-                    })
-                  }
-                />
-                启用该模型（启用后才会出现在模型下拉框中）
-              </label>
-
+              <p className="text-xs text-muted-foreground">当前 Key：{item.apiKeyMasked}（来源：{customKeySourceText(item.apiKeySource)}）</p>
+              <Input type="password" value={item.apiKey} onChange={(event) => updateCustomOpenAIModel(item.localId, { apiKey: event.target.value })} placeholder="输入新 Key（留空则不修改）" />
               {testStatusMap[`custom:${item.localId}`] && (
-                <p
-                  className={
-                    testStatusMap[`custom:${item.localId}`].ok
-                      ? "text-xs text-emerald-600"
-                      : "text-xs text-red-600"
-                  }
-                >
+                <p className={testStatusMap[`custom:${item.localId}`].ok ? "text-xs text-emerald-600" : "text-xs text-red-600"}>
                   {testStatusMap[`custom:${item.localId}`].text}
                 </p>
               )}
             </div>
           ))}
-
           <Button type="button" variant="outline" onClick={addCustomOpenAIModel}>
             <Plus className="mr-1 h-4 w-4" />
             新增 OpenAI 兼容模型

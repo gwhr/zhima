@@ -9,7 +9,7 @@ import { decryptSecret, encryptSecret, maskSecret } from "@/lib/secure-secret";
 import { getResolvedModelProviderConfig } from "@/lib/model-provider-config";
 
 const MODEL_CATALOG_CONFIG_KEY = "platform:model-catalog";
-const CUSTOM_MODEL_ID_PATTERN = /^[a-z0-9][a-z0-9-_]{1,63}$/;
+const CUSTOM_MODEL_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{1,63}$/;
 
 type RuntimeProviderType = "anthropic" | "openai-compatible";
 
@@ -80,10 +80,12 @@ function parseModelCatalog(raw: unknown): StoredModelCatalogConfig {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return {};
   }
+
   const value = raw as Record<string, unknown>;
   const rawModels = Array.isArray(value.customOpenAIModels)
     ? value.customOpenAIModels
     : [];
+
   const customOpenAIModels = rawModels
     .map((item) => normalizeStoredCustomModel(item))
     .filter((item): item is StoredCustomOpenAIModel => item !== null);
@@ -98,6 +100,7 @@ function normalizeStoredCustomModel(raw: unknown): StoredCustomOpenAIModel | nul
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return null;
   }
+
   const value = raw as Record<string, unknown>;
   const id = normalizeModelId(value.id);
   const name = typeof value.name === "string" ? value.name.trim() : "";
@@ -164,11 +167,11 @@ function isValidHttpUrl(value: string): boolean {
 function ensureCustomModelId(id: string) {
   if (!CUSTOM_MODEL_ID_PATTERN.test(id)) {
     throw new Error(
-      "自定义模型 ID 格式无效，请使用 2-64 位小写字母、数字、- 或 _"
+      "自定义模型 ID 格式无效，请使用 2-64 位小写字母、数字、点(.)、连字符(-)或下划线(_)"
     );
   }
   if (builtinModelIds.includes(id as (typeof builtinModelIds)[number])) {
-    throw new Error(`模型 ID「${id}」与内置模型冲突，请更换`);
+    throw new Error(`模型 ID “${id}” 与内置模型冲突，请更换`);
   }
 }
 
@@ -253,18 +256,18 @@ export async function saveCustomOpenAIModels(
 
     ensureCustomModelId(id);
     if (usedIds.has(id)) {
-      throw new Error(`模型 ID「${id}」重复，请修改后重试`);
+      throw new Error(`模型 ID “${id}” 重复，请修改后重试`);
     }
     usedIds.add(id);
 
     if (!name) {
-      throw new Error(`模型「${id}」的显示名称不能为空`);
+      throw new Error(`模型 “${id}” 的显示名称不能为空`);
     }
     if (!modelName) {
-      throw new Error(`模型「${id}」的底层 Model Name 不能为空`);
+      throw new Error(`模型 “${id}” 的底层 Model Name 不能为空`);
     }
     if (!baseUrl || !isValidHttpUrl(baseUrl)) {
-      throw new Error(`模型「${id}」的 Base URL 不合法`);
+      throw new Error(`模型 “${id}” 的 Base URL 不合法`);
     }
 
     const previous = currentById.get(id);
@@ -275,7 +278,7 @@ export async function saveCustomOpenAIModels(
       : previous?.apiKeyEnc || "";
 
     if (!apiKeyEnc) {
-      throw new Error(`模型「${id}」缺少 API Key`);
+      throw new Error(`模型 “${id}” 缺少 API Key`);
     }
 
     nextModels.push({

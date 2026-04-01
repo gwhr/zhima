@@ -1,10 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { requireAuthMock, workspaceCreateMock, workspaceFindManyMock } = vi.hoisted(
+const {
+  requireAuthMock,
+  workspaceCreateMock,
+  workspaceFindManyMock,
+  workspaceCountMock,
+  getPlatformConfigMock,
+  hasUserRechargedMock,
+} = vi.hoisted(
   () => ({
     requireAuthMock: vi.fn(),
     workspaceCreateMock: vi.fn(),
     workspaceFindManyMock: vi.fn(),
+    workspaceCountMock: vi.fn(),
+    getPlatformConfigMock: vi.fn(),
+    hasUserRechargedMock: vi.fn(),
   })
 );
 
@@ -17,8 +27,17 @@ vi.mock("@/lib/db", () => ({
     workspace: {
       create: workspaceCreateMock,
       findMany: workspaceFindManyMock,
+      count: workspaceCountMock,
     },
   },
+}));
+
+vi.mock("@/lib/system-config", () => ({
+  getPlatformConfig: getPlatformConfigMock,
+}));
+
+vi.mock("@/lib/user-entitlements", () => ({
+  hasUserRecharged: hasUserRechargedMock,
 }));
 
 import { GET, POST } from "@/app/api/workspace/route";
@@ -28,6 +47,13 @@ describe("workspace route", () => {
     requireAuthMock.mockReset();
     workspaceCreateMock.mockReset();
     workspaceFindManyMock.mockReset();
+    workspaceCountMock.mockReset();
+    getPlatformConfigMock.mockReset();
+    hasUserRechargedMock.mockReset();
+
+    getPlatformConfigMock.mockResolvedValue({ freeWorkspaceLimit: 3 });
+    hasUserRechargedMock.mockResolvedValue(false);
+    workspaceCountMock.mockResolvedValue(0);
   });
 
   it("returns auth error for GET when unauthenticated", async () => {

@@ -11,6 +11,7 @@ interface PlatformConfig {
   codeGenModelId: string;
   thesisGenModelId: string;
   defaultUserTokenBudget: number;
+  freeWorkspaceLimit: number;
   codeGenTokenReserve: number;
   thesisGenTokenReserve: number;
   chatTokenReserve: number;
@@ -23,8 +24,13 @@ interface PlatformConfig {
   enableCodeGeneration: boolean;
   enableThesisGeneration: boolean;
   enablePreviewBuild: boolean;
+  requireRechargeForDownload: boolean;
   maintenanceNoticeEnabled: boolean;
   maintenanceNoticeText: string;
+  supportContactEnabled: boolean;
+  supportContactTitle: string;
+  supportContactDescription: string;
+  supportContactQrUrl: string;
 }
 
 export default function AdminPlatformPage() {
@@ -147,7 +153,7 @@ export default function AdminPlatformPage() {
             </label>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-5">
             <label className="space-y-1 text-sm">
               <span className="text-muted-foreground">用户默认总额度</span>
               <Input
@@ -160,6 +166,24 @@ export default function AdminPlatformPage() {
                       ? {
                           ...prev,
                           defaultUserTokenBudget: Number(event.target.value || 0),
+                        }
+                      : prev
+                  )
+                }
+              />
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">免费用户工作空间上限</span>
+              <Input
+                type="number"
+                min={1}
+                value={config.freeWorkspaceLimit}
+                onChange={(event) =>
+                  setConfig((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          freeWorkspaceLimit: Number(event.target.value || 0),
                         }
                       : prev
                   )
@@ -420,6 +444,24 @@ export default function AdminPlatformPage() {
           <label className="flex items-center gap-2">
             <input
               type="checkbox"
+              checked={config.requireRechargeForDownload}
+              onChange={(event) =>
+                setConfig((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        requireRechargeForDownload: event.target.checked,
+                      }
+                    : prev
+                )
+              }
+            />
+            下载完整项目需先充值
+          </label>
+
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
               checked={config.maintenanceNoticeEnabled}
               onChange={(event) =>
                 setConfig((prev) =>
@@ -450,6 +492,86 @@ export default function AdminPlatformPage() {
             className="min-h-[90px]"
             placeholder="维护公告内容（可选）"
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">一对一辅导卡片</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={config.supportContactEnabled}
+              onChange={(event) =>
+                setConfig((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        supportContactEnabled: event.target.checked,
+                      }
+                    : prev
+                )
+              }
+            />
+            在工作空间右侧显示“一对一辅导”卡片
+          </label>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">卡片标题</span>
+              <Input
+                value={config.supportContactTitle}
+                onChange={(event) =>
+                  setConfig((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          supportContactTitle: event.target.value,
+                        }
+                      : prev
+                  )
+                }
+              />
+            </label>
+
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">二维码图片地址（HTTPS）</span>
+              <Input
+                value={config.supportContactQrUrl}
+                placeholder="https://..."
+                onChange={(event) =>
+                  setConfig((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          supportContactQrUrl: event.target.value,
+                        }
+                      : prev
+                  )
+                }
+              />
+            </label>
+          </div>
+
+          <label className="space-y-1 text-sm block">
+            <span className="text-muted-foreground">卡片描述</span>
+            <Textarea
+              value={config.supportContactDescription}
+              className="min-h-[88px]"
+              onChange={(event) =>
+                setConfig((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        supportContactDescription: event.target.value,
+                      }
+                    : prev
+                )
+              }
+            />
+          </label>
         </CardContent>
       </Card>
 

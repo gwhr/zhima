@@ -32,6 +32,7 @@ export async function PATCH(req: Request) {
   const patch: Record<string, unknown> = {};
   const positiveNumberKeys = [
     "defaultUserTokenBudget",
+    "freeWorkspaceLimit",
     "codeGenTokenReserve",
     "thesisGenTokenReserve",
     "chatTokenReserve",
@@ -70,7 +71,9 @@ export async function PATCH(req: Request) {
     "enableCodeGeneration",
     "enableThesisGeneration",
     "enablePreviewBuild",
+    "requireRechargeForDownload",
     "maintenanceNoticeEnabled",
+    "supportContactEnabled",
   ] as const;
   for (const key of booleanKeys) {
     if (key in body) {
@@ -91,6 +94,17 @@ export async function PATCH(req: Request) {
 
   if ("maintenanceNoticeText" in body) {
     patch.maintenanceNoticeText = String(body.maintenanceNoticeText || "").trim();
+  }
+  if ("supportContactTitle" in body) {
+    patch.supportContactTitle = String(body.supportContactTitle || "").trim();
+  }
+  if ("supportContactDescription" in body) {
+    patch.supportContactDescription = String(
+      body.supportContactDescription || ""
+    ).trim();
+  }
+  if ("supportContactQrUrl" in body) {
+    patch.supportContactQrUrl = String(body.supportContactQrUrl || "").trim();
   }
 
   const beforeConfig = await getPlatformConfig();

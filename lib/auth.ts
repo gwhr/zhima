@@ -5,6 +5,10 @@ import { db } from "@/lib/db";
 import { ensureBuiltinAdminUser } from "@/lib/bootstrap/admin-user";
 import { verifyCode } from "@/lib/sms/provider";
 
+const DEVICE_FREE_LOGIN_DAYS = 7;
+const DEVICE_FREE_LOGIN_MAX_AGE_SECONDS =
+  DEVICE_FREE_LOGIN_DAYS * 24 * 60 * 60;
+
 export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
@@ -66,7 +70,12 @@ export const authOptions: NextAuthOptions = {
   ],
   session: {
     strategy: "jwt",
-    maxAge: 30 * 24 * 60 * 60,
+    // Keep users signed in on the same device for 7 days.
+    maxAge: DEVICE_FREE_LOGIN_MAX_AGE_SECONDS,
+    updateAge: 24 * 60 * 60,
+  },
+  jwt: {
+    maxAge: DEVICE_FREE_LOGIN_MAX_AGE_SECONDS,
   },
   callbacks: {
     async jwt({ token, user }) {

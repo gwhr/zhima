@@ -34,11 +34,11 @@ export async function GET() {
 
   const [platformConfig, providerConfig, modelOptions, customOpenAIModels] =
     await Promise.all([
-    getPlatformConfig(),
-    getModelProviderAdminView(),
-    listAvailableModelOptions(),
-    getCustomOpenAIModelAdminView(),
-  ]);
+      getPlatformConfig(),
+      getModelProviderAdminView(),
+      listAvailableModelOptions(),
+      getCustomOpenAIModelAdminView(),
+    ]);
 
   return success({
     modelOptions: modelOptions.map((item) => item.id),
@@ -74,10 +74,11 @@ export async function PATCH(req: Request) {
     if (!Array.isArray(raw)) {
       return error("customOpenAIModels 必须是数组", 400);
     }
+
     const normalized: CustomOpenAIModelPatch[] = [];
     for (const item of raw) {
       if (!item || typeof item !== "object" || Array.isArray(item)) {
-        return error("customOpenAIModels 的每项都必须是对象", 400);
+        return error("customOpenAIModels 的每一项都必须是对象", 400);
       }
       const value = item as Record<string, unknown>;
       normalized.push({
@@ -85,8 +86,7 @@ export async function PATCH(req: Request) {
         name: String(value.name || "").trim(),
         modelName: String(value.modelName || "").trim(),
         baseUrl: String(value.baseUrl || "").trim(),
-        apiKey:
-          typeof value.apiKey === "string" ? value.apiKey : undefined,
+        apiKey: typeof value.apiKey === "string" ? value.apiKey : undefined,
         inputCostPerMToken:
           value.inputCostPerMToken === undefined
             ? undefined
@@ -99,8 +99,7 @@ export async function PATCH(req: Request) {
           value.cacheHitCostPerMToken === undefined
             ? undefined
             : Number(value.cacheHitCostPerMToken),
-        enabled:
-          value.enabled === undefined ? true : Boolean(value.enabled),
+        enabled: value.enabled === undefined ? true : Boolean(value.enabled),
       });
     }
     customOpenAIModelsPatch = normalized;
@@ -161,87 +160,90 @@ export async function PATCH(req: Request) {
     }
   }
 
-  const before = await Promise.all([
-    getPlatformConfig(),
-    getModelProviderAdminView(),
-    getCustomOpenAIModelAdminView(),
-  ]);
-  const beforePlatform = before[0];
-  const beforeProviders = before[1];
-  const beforeCustomOpenAIModels = before[2];
+  const [beforePlatform, beforeProviders, beforeCustomOpenAIModels] =
+    await Promise.all([
+      getPlatformConfig(),
+      getModelProviderAdminView(),
+      getCustomOpenAIModelAdminView(),
+    ]);
 
-  let nextPlatform = beforePlatform;
-  let nextProviders = beforeProviders;
-  let nextCustomOpenAIModels = beforeCustomOpenAIModels;
+  try {
+    let nextPlatform = beforePlatform;
+    let nextProviders = beforeProviders;
+    let nextCustomOpenAIModels = beforeCustomOpenAIModels;
 
-  if (Object.keys(providerPatch).length > 0) {
-    nextProviders = await saveModelProviderConfig(providerPatch);
-  }
-  if (customOpenAIModelsPatch) {
-    nextCustomOpenAIModels = await saveCustomOpenAIModels(
-      customOpenAIModelsPatch
-    );
-  }
-  if (Object.keys(platformPatch).length > 0) {
-    nextPlatform = await savePlatformConfig(platformPatch);
-  }
+    if (Object.keys(providerPatch).length > 0) {
+      nextProviders = await saveModelProviderConfig(providerPatch);
+    }
+    if (customOpenAIModelsPatch) {
+      nextCustomOpenAIModels = await saveCustomOpenAIModels(customOpenAIModelsPatch);
+    }
+    if (Object.keys(platformPatch).length > 0) {
+      nextPlatform = await savePlatformConfig(platformPatch);
+    }
 
-  const nextModelOptions = await listAvailableModelOptions();
+    const nextModelOptions = await listAvailableModelOptions();
 
-  if (
-    Object.keys(platformPatch).length > 0 ||
-    Object.keys(providerPatch).length > 0 ||
-    customOpenAIModelsPatch !== null
-  ) {
-    await logAdminAudit({
-      adminUserId: session!.user.id,
-      action: "platform.models.update",
-      module: "platform",
-      targetType: "SystemConfig",
-      targetId: "platform:model-management",
-      summary: "更新模型管理配置",
-      before: {
-        modelSelection: {
-          codeGenModelId: beforePlatform.codeGenModelId,
-          thesisGenModelId: beforePlatform.thesisGenModelId,
+    if (
+      Object.keys(platformPatch).length > 0 ||
+      Object.keys(providerPatch).length > 0 ||
+      customOpenAIModelsPatch !== null
+    ) {
+      await logAdminAudit({
+        adminUserId: session!.user.id,
+        action: "platform.models.update",
+        module: "platform",
+        targetType: "SystemConfig",
+        targetId: "platform:model-management",
+        summary: "更新模型管理配置",
+        before: {
+          modelSelection: {
+            codeGenModelId: beforePlatform.codeGenModelId,
+            thesisGenModelId: beforePlatform.thesisGenModelId,
+          },
+          providers: beforeProviders,
+          customOpenAIModels: beforeCustomOpenAIModels,
         },
-        providers: beforeProviders,
-        customOpenAIModels: beforeCustomOpenAIModels,
-      },
-      after: {
-        modelSelection: {
-          codeGenModelId: nextPlatform.codeGenModelId,
-          thesisGenModelId: nextPlatform.thesisGenModelId,
+        after: {
+          modelSelection: {
+            codeGenModelId: nextPlatform.codeGenModelId,
+            thesisGenModelId: nextPlatform.thesisGenModelId,
+          },
+          providers: nextProviders,
+          customOpenAIModels: nextCustomOpenAIModels,
         },
-        providers: nextProviders,
-        customOpenAIModels: nextCustomOpenAIModels,
+        metadata: {
+          changedKeys: [
+            ...Object.keys(platformPatch),
+            ...Object.keys(providerPatch),
+            ...(customOpenAIModelsPatch ? ["customOpenAIModels"] : []),
+          ],
+        },
+        req,
+      });
+    }
+
+    return success({
+      modelOptions: nextModelOptions.map((item) => item.id),
+      modelOptionDetails: nextModelOptions,
+      builtinPricing: builtinModelDefinitions.map((item) => ({
+        id: item.id,
+        name: item.name,
+        inputCostPerMToken: item.inputCostPerMToken,
+        outputCostPerMToken: item.outputCostPerMToken,
+        cacheHitCostPerMToken: item.cacheHitCostPerMToken,
+      })),
+      config: {
+        codeGenModelId: nextPlatform.codeGenModelId,
+        thesisGenModelId: nextPlatform.thesisGenModelId,
       },
-      metadata: {
-        changedKeys: [
-          ...Object.keys(platformPatch),
-          ...Object.keys(providerPatch),
-          ...(customOpenAIModelsPatch ? ["customOpenAIModels"] : []),
-        ],
-      },
-      req,
+      providers: nextProviders,
+      customOpenAIModels: nextCustomOpenAIModels,
     });
+  } catch (caughtError) {
+    if (caughtError instanceof Error && caughtError.message) {
+      return error(caughtError.message, 400);
+    }
+    return error("保存模型配置失败", 500);
   }
-
-  return success({
-    modelOptions: nextModelOptions.map((item) => item.id),
-    modelOptionDetails: nextModelOptions,
-    builtinPricing: builtinModelDefinitions.map((item) => ({
-      id: item.id,
-      name: item.name,
-      inputCostPerMToken: item.inputCostPerMToken,
-      outputCostPerMToken: item.outputCostPerMToken,
-      cacheHitCostPerMToken: item.cacheHitCostPerMToken,
-    })),
-    config: {
-      codeGenModelId: nextPlatform.codeGenModelId,
-      thesisGenModelId: nextPlatform.thesisGenModelId,
-    },
-    providers: nextProviders,
-    customOpenAIModels: nextCustomOpenAIModels,
-  });
 }

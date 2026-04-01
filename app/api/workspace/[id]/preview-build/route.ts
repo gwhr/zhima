@@ -1,8 +1,18 @@
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth-helpers";
+import { syncRuntimePreviewQueue } from "@/lib/runtime-preview";
 
-interface Role { name: string; description: string }
-interface Module { name: string; features: string[]; enabled: boolean }
+interface Role {
+  name: string;
+  description: string;
+}
+
+interface Module {
+  name: string;
+  features?: string[];
+  enabled?: boolean;
+}
+
 interface Requirements {
   summary?: string;
   roles?: Role[];
@@ -10,345 +20,750 @@ interface Requirements {
   tables?: string[];
 }
 
-function generateMockData(tables: string[]): string {
-  const mockMap: Record<string, () => object[]> = {
-    users: () => [
-      { id: 1, username: "admin", name: "系统管理员", role: "管理员", email: "admin@example.com", status: "正常", createdAt: "2026-01-15" },
-      { id: 2, username: "librarian", name: "李图书", role: "图书管理员", email: "lib@example.com", status: "正常", createdAt: "2026-02-01" },
-      { id: 3, username: "reader01", name: "张同学", role: "读者", email: "zhang@example.com", status: "正常", createdAt: "2026-03-10" },
-      { id: 4, username: "reader02", name: "王同学", role: "读者", email: "wang@example.com", status: "正常", createdAt: "2026-03-12" },
-    ],
-    books: () => [
-      { id: 1, title: "Java 核心技术", author: "凯·霍斯特曼", isbn: "978-7-111-61893-0", category: "计算机", stock: 5, borrowed: 2, status: "在库" },
-      { id: 2, title: "数据结构与算法", author: "严蔚敏", isbn: "978-7-302-33064-6", category: "计算机", stock: 3, borrowed: 1, status: "在库" },
-      { id: 3, title: "操作系统概念", author: "西尔伯沙茨", isbn: "978-7-111-64087-0", category: "计算机", stock: 4, borrowed: 0, status: "在库" },
-      { id: 4, title: "计算机网络", author: "谢希仁", isbn: "978-7-121-31638-4", category: "计算机", stock: 6, borrowed: 3, status: "在库" },
-      { id: 5, title: "人工智能导论", author: "王万良", isbn: "978-7-040-51856-1", category: "计算机", stock: 2, borrowed: 2, status: "借出" },
-    ],
-    borrow_records: () => [
-      { id: 1, bookTitle: "Java 核心技术", borrower: "张同学", borrowDate: "2026-03-01", returnDate: "2026-03-15", status: "已归还" },
-      { id: 2, bookTitle: "数据结构与算法", borrower: "王同学", borrowDate: "2026-03-05", returnDate: null, status: "借阅中" },
-      { id: 3, bookTitle: "人工智能导论", borrower: "张同学", borrowDate: "2026-03-10", returnDate: null, status: "借阅中" },
-      { id: 4, bookTitle: "计算机网络", borrower: "李同学", borrowDate: "2026-02-20", returnDate: "2026-03-05", status: "已归还" },
-    ],
-    orders: () => [
-      { id: 1, orderNo: "ORD20260301001", customer: "张三", amount: 299.00, status: "已完成", createdAt: "2026-03-01" },
-      { id: 2, orderNo: "ORD20260305002", customer: "李四", amount: 599.00, status: "待发货", createdAt: "2026-03-05" },
-    ],
-    products: () => [
-      { id: 1, name: "商品A", price: 99.00, stock: 50, category: "电子产品", status: "上架" },
-      { id: 2, name: "商品B", price: 199.00, stock: 30, category: "生活用品", status: "上架" },
-    ],
-  };
+interface TechStack {
+  backend?: string;
+  database?: string;
+  frontend?: string;
+}
 
-  const data: Record<string, object[]> = {};
-  for (const table of tables) {
-    const key = table.toLowerCase().replace(/[-\s]/g, "_");
-    const generator = mockMap[key];
-    data[key] = generator
-      ? generator()
-      : Array.from({ length: 4 }, (_, i) => ({
-          id: i + 1,
-          name: `${table} 示例 ${i + 1}`,
-          status: i % 2 === 0 ? "正常" : "待处理",
-          createdAt: `2026-03-${String(i + 10).padStart(2, "0")}`,
-        }));
+const DATABASE_LABELS: Record<string, string> = {
+  mysql: "MySQL",
+  postgresql: "PostgreSQL",
+  mongodb: "MongoDB",
+};
+
+const FRONTEND_LABELS: Record<string, string> = {
+  vue3: "Vue 3",
+  react: "React",
+};
+
+interface PreviewRuntimePreset {
+  id: string;
+  label: string;
+  runtimeName: string;
+  command: string;
+  endpointHint: string;
+  note: string;
+}
+
+const PREVIEW_RUNTIME_PRESETS: Record<string, PreviewRuntimePreset> = {
+  "java-springboot": {
+    id: "java-springboot",
+    label: "Java + SpringBoot",
+    runtimeName: "Spring 容器（Mock）",
+    command: "cd backend && mvn spring-boot:run",
+    endpointHint: "/api/**",
+    note: "适合 Java Web 毕设，默认按 Controller + Service + DAO 分层展示。",
+  },
+  "python-django": {
+    id: "python-django",
+    label: "Python + Django",
+    runtimeName: "Django 开发服务（Mock）",
+    command:
+      "cd backend && pip install -r requirements.txt && python manage.py migrate && python manage.py runserver 0.0.0.0:8000",
+    endpointHint: "/api/** 或 Django app 路由",
+    note: "适合管理系统类毕设，默认按 project + app 结构展示。",
+  },
+  "python-flask": {
+    id: "python-flask",
+    label: "Python + Flask",
+    runtimeName: "Flask 开发服务（Mock）",
+    command:
+      "cd backend && pip install -r requirements.txt && flask --app app run --host 0.0.0.0 --port 8000",
+    endpointHint: "/api/**",
+    note: "适合轻量 API / 管理后台，默认按 Blueprint 模块化展示。",
+  },
+  "python-fastapi": {
+    id: "python-fastapi",
+    label: "Python + FastAPI",
+    runtimeName: "FastAPI 开发服务（Mock）",
+    command:
+      "cd backend && pip install -r requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload",
+    endpointHint: "/docs 与 /openapi.json",
+    note: "适合接口驱动型毕设，默认按 router + schema 分层展示。",
+  },
+  "nodejs-express": {
+    id: "nodejs-express",
+    label: "Node.js + Express",
+    runtimeName: "Express 运行时（Mock）",
+    command: "cd backend && npm install && npm run dev",
+    endpointHint: "/api/**",
+    note: "适合全栈业务系统，默认按 route + controller 结构展示。",
+  },
+  "nodejs-koa": {
+    id: "nodejs-koa",
+    label: "Node.js + Koa",
+    runtimeName: "Koa 运行时（Mock）",
+    command: "cd backend && npm install && npm run dev",
+    endpointHint: "/api/**",
+    note: "适合轻中型业务系统，默认按 middleware + route 结构展示。",
+  },
+};
+
+const DEFAULT_PREVIEW_PRESET: PreviewRuntimePreset = {
+  id: "generic",
+  label: "通用后端",
+  runtimeName: "通用预览容器（Mock）",
+  command: "cd backend && 参考 README 启动后端服务",
+  endpointHint: "/api/**",
+  note: "当前技术栈暂无专属预览模板，已切换为通用模式。",
+};
+
+function normalizeTechStack(value: unknown): TechStack {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const raw = value as Record<string, unknown>;
+  return {
+    backend: typeof raw.backend === "string" ? raw.backend : undefined,
+    database: typeof raw.database === "string" ? raw.database : undefined,
+    frontend: typeof raw.frontend === "string" ? raw.frontend : undefined,
+  };
+}
+
+function resolvePreviewPreset(backendValue: string | undefined): PreviewRuntimePreset {
+  const key = (backendValue || "").trim().toLowerCase();
+  if (key && PREVIEW_RUNTIME_PRESETS[key]) return PREVIEW_RUNTIME_PRESETS[key];
+  return DEFAULT_PREVIEW_PRESET;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function toList<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function normalizeRequirements(value: unknown): Requirements {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
   }
-  return JSON.stringify(data);
+  const raw = value as Record<string, unknown>;
+  return {
+    summary: typeof raw.summary === "string" ? raw.summary : undefined,
+    roles: toList<Role>(raw.roles),
+    modules: toList<Module>(raw.modules),
+    tables: toList<string>(raw.tables),
+  };
+}
+
+function buildMockRows(tableName: string, count = 5) {
+  return Array.from({ length: count }, (_, index) => {
+    const i = index + 1;
+    return {
+      id: i,
+      name: `${tableName} 示例${i}`,
+      status: i % 3 === 0 ? "处理中" : "正常",
+      createdAt: `2026-03-${String(10 + i).padStart(2, "0")}`,
+    };
+  });
 }
 
 function buildPreviewHTML(workspace: {
   name: string;
   topic: string;
-  techStack: Record<string, string>;
   requirements: Requirements;
-}): string {
-  const { requirements, topic } = workspace;
-  const roles = requirements?.roles || [];
-  const modules = requirements?.modules || [];
-  const tables = requirements?.tables || [];
-  const mockData = generateMockData(tables);
+  techStack: TechStack;
+}) {
+  const previewPreset = resolvePreviewPreset(workspace.techStack.backend);
+  const databaseLabel = workspace.techStack.database
+    ? DATABASE_LABELS[workspace.techStack.database] || workspace.techStack.database
+    : "未指定";
+  const frontendLabel = workspace.techStack.frontend
+    ? FRONTEND_LABELS[workspace.techStack.frontend] || workspace.techStack.frontend
+    : "未指定";
+  const techStackSummary = `${previewPreset.label} + ${databaseLabel} + ${frontendLabel}`;
 
-  const menuItems = modules.map((m, i) => `{ id: ${i}, name: '${m.name}', icon: '${["📋","📦","📊","⚙️","👤","📝","🔍","📁"][i % 8]}', features: ${JSON.stringify(m.features)} }`).join(",\n        ");
+  const roles = workspace.requirements.roles ?? [];
+  const modules =
+    (workspace.requirements.modules ?? []).filter((item) => item.enabled !== false) || [];
+  const tables = workspace.requirements.tables ?? [];
+  const moduleItems =
+    modules.length > 0
+      ? modules
+      : [
+          {
+            name: "核心模块",
+            features: ["基础列表", "详情查看", "新增编辑", "状态管理"],
+          },
+        ];
+  const tableItems = tables.length > 0 ? tables : ["users", "orders", "products"];
+  const mockData = Object.fromEntries(
+    tableItems.map((table) => [table, buildMockRows(table)])
+  );
 
-  const tableViews = tables.map((t) => {
-    const key = t.toLowerCase().replace(/[-\s]/g, "_");
-    return `
-      case '${t}':
-        return mockData['${key}'] || [];`;
-  }).join("");
+  const modulesJson = JSON.stringify(moduleItems);
+  const tablesJson = JSON.stringify(tableItems);
+  const mockDataJson = JSON.stringify(mockData);
+  const summary = workspace.requirements.summary || "可运行项目脚手架预览（示例数据）";
+  const roleHtml =
+    roles.length > 0
+      ? roles
+          .map(
+            (role) =>
+              `<li><strong>${escapeHtml(role.name)}</strong><span>${escapeHtml(
+                role.description || "—"
+              )}</span></li>`
+          )
+          .join("")
+      : "<li><strong>默认角色</strong><span>根据你的题目自动生成</span></li>";
 
-  return `<!DOCTYPE html>
+  return `<!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${topic}</title>
-<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"><\/script>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; color: #333; }
-  .layout { display: flex; height: 100vh; }
-  .sidebar { width: 220px; background: #1e293b; color: #fff; display: flex; flex-direction: column; flex-shrink: 0; }
-  .sidebar-header { padding: 20px 16px; border-bottom: 1px solid rgba(255,255,255,0.1); }
-  .sidebar-header h1 { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .sidebar-header p { font-size: 11px; color: #94a3b8; margin-top: 4px; }
-  .nav-menu { flex: 1; padding: 8px; overflow-y: auto; }
-  .nav-item { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; transition: all .15s; margin-bottom: 2px; color: #cbd5e1; }
-  .nav-item:hover { background: rgba(255,255,255,0.08); color: #fff; }
-  .nav-item.active { background: #3b82f6; color: #fff; }
-  .nav-icon { font-size: 16px; }
-  .sidebar-footer { padding: 12px 16px; border-top: 1px solid rgba(255,255,255,0.1); }
-  .user-info { display: flex; align-items: center; gap: 8px; }
-  .avatar { width: 32px; height: 32px; border-radius: 50%; background: #3b82f6; display: flex; align-items: center; justify-content: center; font-size: 14px; }
-  .user-name { font-size: 12px; }
-  .user-role { font-size: 10px; color: #94a3b8; }
-  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-  .topbar { height: 56px; background: #fff; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; flex-shrink: 0; }
-  .topbar h2 { font-size: 16px; font-weight: 600; }
-  .topbar-actions { display: flex; gap: 8px; }
-  .btn { padding: 6px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; border: 1px solid #d1d5db; background: #fff; transition: all .15s; }
-  .btn:hover { background: #f9fafb; }
-  .btn-primary { background: #3b82f6; color: #fff; border-color: #3b82f6; }
-  .btn-primary:hover { background: #2563eb; }
-  .btn-sm { padding: 4px 10px; font-size: 12px; }
-  .btn-danger { color: #ef4444; border-color: #fca5a5; }
-  .content { flex: 1; padding: 24px; overflow-y: auto; }
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
-  .stat-card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
-  .stat-label { font-size: 12px; color: #6b7280; margin-bottom: 4px; }
-  .stat-value { font-size: 28px; font-weight: 700; }
-  .stat-value.blue { color: #3b82f6; }
-  .stat-value.green { color: #10b981; }
-  .stat-value.orange { color: #f59e0b; }
-  .stat-value.purple { color: #8b5cf6; }
-  .card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 16px; }
-  .card-title { font-size: 15px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; }
-  table { width: 100%; border-collapse: collapse; }
-  th { text-align: left; padding: 10px 12px; font-size: 12px; color: #6b7280; font-weight: 500; border-bottom: 1px solid #e5e7eb; background: #f9fafb; }
-  td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #f3f4f6; }
-  tr:hover td { background: #f9fafb; }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 500; }
-  .badge-green { background: #d1fae5; color: #065f46; }
-  .badge-blue { background: #dbeafe; color: #1e40af; }
-  .badge-yellow { background: #fef3c7; color: #92400e; }
-  .badge-red { background: #fee2e2; color: #991b1b; }
-  .search-box { padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 13px; width: 240px; outline: none; }
-  .search-box:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
-  .empty { text-align: center; padding: 60px 20px; color: #9ca3af; }
-  .empty-icon { font-size: 48px; margin-bottom: 12px; }
-  .features-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .feature-tag { padding: 3px 10px; background: #eff6ff; color: #3b82f6; border-radius: 6px; font-size: 11px; }
-  .dashboard-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
-  @media (max-width: 900px) { .dashboard-grid { grid-template-columns: 1fr; } .sidebar { display: none; } }
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtml(workspace.topic)} · 预览</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f1f5f9;
+      color: #0f172a;
+      height: 100vh;
+      display: grid;
+      grid-template-columns: 250px 1fr;
+    }
+    .sidebar {
+      background: linear-gradient(180deg, #0f172a, #1e293b);
+      color: #cbd5e1;
+      padding: 18px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .brand h1 {
+      margin: 0;
+      font-size: 18px;
+      color: #fff;
+    }
+    .brand p {
+      margin: 6px 0 0 0;
+      font-size: 12px;
+      color: #94a3b8;
+      line-height: 1.5;
+    }
+    .module-list {
+      margin: 4px 0 0 0;
+      padding: 0;
+      list-style: none;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .module-list button {
+      width: 100%;
+      border: 0;
+      border-radius: 8px;
+      background: rgba(255,255,255,.06);
+      color: #e2e8f0;
+      text-align: left;
+      padding: 10px 10px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .module-list button.active { background: #0ea5e9; color: #fff; }
+    .main {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .header {
+      background: #fff;
+      border-bottom: 1px solid #e2e8f0;
+      padding: 14px 20px;
+    }
+    .header h2 {
+      margin: 0;
+      font-size: 19px;
+    }
+    .header p {
+      margin: 6px 0 0 0;
+      color: #475569;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .content {
+      padding: 16px 18px;
+      display: grid;
+      grid-template-columns: 1.5fr 1fr;
+      gap: 14px;
+      overflow: auto;
+    }
+    .card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 14px;
+      box-shadow: 0 10px 25px rgba(2, 6, 23, .04);
+    }
+    .card h3 {
+      margin: 0 0 10px 0;
+      font-size: 14px;
+    }
+    .feature-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .feature-tags span {
+      font-size: 12px;
+      border-radius: 999px;
+      padding: 4px 10px;
+      background: #e0f2fe;
+      color: #0369a1;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #e2e8f0;
+      text-align: left;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    th { color: #475569; background: #f8fafc; }
+    .status {
+      display: inline-flex;
+      border-radius: 999px;
+      padding: 2px 8px;
+      background: #dbeafe;
+      color: #1d4ed8;
+      font-size: 11px;
+    }
+    .role-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .role-list li {
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 8px 10px;
+      display: grid;
+      gap: 3px;
+    }
+    .role-list strong { font-size: 13px; }
+    .role-list span { font-size: 12px; color: #64748b; }
+    .runtime-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .runtime-item {
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 9px 10px;
+      background: #f8fafc;
+    }
+    .runtime-item p {
+      margin: 0;
+      font-size: 11px;
+      color: #64748b;
+    }
+    .runtime-item strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 13px;
+      color: #0f172a;
+      word-break: break-all;
+    }
+    .runtime-command {
+      margin-top: 10px;
+      border-radius: 8px;
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 10px;
+      font-size: 12px;
+      line-height: 1.55;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    @media (max-width: 1000px) {
+      body { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
+      .content { grid-template-columns: 1fr; }
+      .runtime-grid { grid-template-columns: 1fr; }
+    }
+  </style>
 </head>
 <body>
-<div id="app">
-  <div class="layout">
-    <div class="sidebar">
-      <div class="sidebar-header">
-        <h1>{{projectName}}</h1>
-        <p>{{currentRole}}</p>
-      </div>
-      <div class="nav-menu">
-        <div v-for="item in menuItems" :key="item.id"
-             :class="['nav-item', { active: activeMenu === item.id }]"
-             @click="activeMenu = item.id">
-          <span class="nav-icon">{{item.icon}}</span>
-          <span>{{item.name}}</span>
-        </div>
-      </div>
-      <div class="sidebar-footer">
-        <div class="user-info">
-          <div class="avatar">👤</div>
-          <div>
-            <div class="user-name">{{currentUser}}</div>
-            <div class="user-role">{{currentRole}}</div>
-          </div>
-        </div>
-      </div>
+  <aside class="sidebar">
+    <div class="brand">
+      <h1>${escapeHtml(workspace.name)}</h1>
+      <p>运行预览（示例数据）</p>
     </div>
-    <div class="main">
-      <div class="topbar">
-        <h2>{{currentModuleName}}</h2>
-        <div class="topbar-actions">
-          <input class="search-box" placeholder="搜索..." v-model="searchQuery" />
-          <button class="btn btn-primary" @click="showAddHint">+ 新增</button>
+    <ul class="module-list" id="module-list"></ul>
+  </aside>
+  <main class="main">
+    <header class="header">
+      <h2>${escapeHtml(workspace.topic)}</h2>
+      <p>${escapeHtml(summary)}</p>
+    </header>
+    <section class="content">
+      <article class="card" style="grid-column: 1 / -1;">
+        <h3>预览运行环境</h3>
+        <div class="runtime-grid">
+          <div class="runtime-item">
+            <p>技术栈组合</p>
+            <strong>${escapeHtml(techStackSummary)}</strong>
+          </div>
+          <div class="runtime-item">
+            <p>运行容器</p>
+            <strong>${escapeHtml(previewPreset.runtimeName)}</strong>
+          </div>
+          <div class="runtime-item">
+            <p>默认接口入口</p>
+            <strong>${escapeHtml(previewPreset.endpointHint)}</strong>
+          </div>
+          <div class="runtime-item">
+            <p>说明</p>
+            <strong>${escapeHtml(previewPreset.note)}</strong>
+          </div>
         </div>
-      </div>
-      <div class="content">
-        <template v-if="activeMenu === -1">
-          <div class="stats">
-            <div class="stat-card" v-for="(s, i) in dashboardStats" :key="i">
-              <div class="stat-label">{{s.label}}</div>
-              <div :class="['stat-value', s.color]">{{s.value}}</div>
-            </div>
-          </div>
-          <div class="dashboard-grid">
-            <div class="card">
-              <div class="card-title">最近操作</div>
-              <table>
-                <thead><tr><th>操作</th><th>对象</th><th>时间</th><th>状态</th></tr></thead>
-                <tbody>
-                  <tr v-for="r in recentActions" :key="r.id">
-                    <td>{{r.action}}</td><td>{{r.target}}</td><td>{{r.time}}</td>
-                    <td><span :class="'badge badge-' + r.badgeColor">{{r.status}}</span></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div class="card">
-              <div class="card-title">系统角色</div>
-              <div v-for="role in roles" :key="role.name" style="padding:8px 0;border-bottom:1px solid #f3f4f6">
-                <div style="font-size:13px;font-weight:500">{{role.name}}</div>
-                <div style="font-size:11px;color:#6b7280;margin-top:2px">{{role.description}}</div>
-              </div>
-            </div>
-          </div>
-        </template>
-        <template v-else>
-          <div class="card">
-            <div class="card-title">
-              <span>{{currentModuleName}}</span>
-              <span style="font-size:12px;color:#6b7280">共 {{filteredData.length}} 条记录</span>
-            </div>
-            <div class="features-list" style="margin-bottom:16px">
-              <span class="feature-tag" v-for="f in currentFeatures" :key="f">{{f}}</span>
-            </div>
-            <table v-if="filteredData.length > 0">
-              <thead><tr><th v-for="col in tableColumns" :key="col">{{col}}</th><th>操作</th></tr></thead>
-              <tbody>
-                <tr v-for="row in filteredData" :key="row.id">
-                  <td v-for="col in tableColumns" :key="col">
-                    <span v-if="col==='status'||col==='状态'" :class="'badge badge-' + getStatusColor(row[col])">{{row[col]}}</span>
-                    <span v-else>{{row[col]}}</span>
-                  </td>
-                  <td>
-                    <button class="btn btn-sm" @click="showEditHint(row)">编辑</button>
-                    <button class="btn btn-sm btn-danger" @click="showDeleteHint(row)" style="margin-left:4px">删除</button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <div class="empty" v-else>
-              <div class="empty-icon">📭</div>
-              <p>暂无数据</p>
-            </div>
-          </div>
-        </template>
-      </div>
-    </div>
-  </div>
-  <div v-if="toast" style="position:fixed;top:20px;right:20px;background:#1e293b;color:#fff;padding:12px 20px;border-radius:8px;font-size:13px;z-index:999;box-shadow:0 4px 12px rgba(0,0,0,0.15);transition:all .3s">
-    {{toast}}
-  </div>
-</div>
-<script>
-const { createApp } = Vue;
-const mockData = ${mockData};
+        <pre class="runtime-command">${escapeHtml(previewPreset.command)}</pre>
+      </article>
+      <article class="card">
+        <h3 id="module-title">模块详情</h3>
+        <div id="module-features" class="feature-tags"></div>
+      </article>
+      <article class="card">
+        <h3>系统角色</h3>
+        <ul class="role-list">
+          ${roleHtml}
+        </ul>
+      </article>
+      <article class="card" style="grid-column: 1 / -1;">
+        <h3 id="table-title">数据预览</h3>
+        <div style="overflow:auto;">
+          <table>
+            <thead><tr><th>ID</th><th>名称</th><th>状态</th><th>创建时间</th></tr></thead>
+            <tbody id="table-body"></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+  </main>
+  <script>
+    const modules = ${modulesJson};
+    const tables = ${tablesJson};
+    const mockData = ${mockDataJson};
+    let active = 0;
 
-createApp({
-  data() {
-    return {
-      projectName: '${topic.replace(/'/g, "\\'")}',
-      activeMenu: -1,
-      searchQuery: '',
-      currentUser: '管理员',
-      currentRole: '${roles[0]?.name || "系统管理员"}',
-      toast: '',
-      menuItems: [
-        { id: -1, name: '仪表盘', icon: '📊', features: ['数据概览','统计分析'] },
-        ${menuItems}
-      ],
-      roles: ${JSON.stringify(roles)},
-      dashboardStats: [
-        ${tables.map((t, i) => {
-          const colors = ['blue','green','orange','purple'];
-          const counts = [156, 42, 89, 12];
-          return `{ label: '${t}', value: ${counts[i % 4]}, color: '${colors[i % 4]}' }`;
-        }).join(",\n        ")}
-      ],
-      recentActions: [
-        { id: 1, action: '新增', target: '示例记录 #1', time: '3 分钟前', status: '成功', badgeColor: 'green' },
-        { id: 2, action: '修改', target: '示例记录 #2', time: '10 分钟前', status: '成功', badgeColor: 'green' },
-        { id: 3, action: '查询', target: '批量查询', time: '30 分钟前', status: '完成', badgeColor: 'blue' },
-        { id: 4, action: '删除', target: '示例记录 #5', time: '1 小时前', status: '已处理', badgeColor: 'yellow' },
-      ]
-    };
-  },
-  computed: {
-    currentModuleName() {
-      const item = this.menuItems.find(m => m.id === this.activeMenu);
-      return item ? item.name : '仪表盘';
-    },
-    currentFeatures() {
-      const item = this.menuItems.find(m => m.id === this.activeMenu);
-      return item ? item.features : [];
-    },
-    currentTableData() {
-      const tables = ${JSON.stringify(tables)};
-      const idx = this.activeMenu;
-      if (idx < 0 || idx >= tables.length) return [];
-      const key = tables[idx].toLowerCase().replace(/[-\\s]/g, '_');
-      return mockData[key] || [];
-    },
-    tableColumns() {
-      const data = this.currentTableData;
-      if (data.length === 0) return [];
-      return Object.keys(data[0]).filter(k => k !== 'id');
-    },
-    filteredData() {
-      const q = this.searchQuery.toLowerCase();
-      if (!q) return this.currentTableData;
-      return this.currentTableData.filter(row =>
-        Object.values(row).some(v => String(v).toLowerCase().includes(q))
-      );
+    const moduleList = document.getElementById("module-list");
+    const moduleTitle = document.getElementById("module-title");
+    const moduleFeatures = document.getElementById("module-features");
+    const tableTitle = document.getElementById("table-title");
+    const tableBody = document.getElementById("table-body");
+
+    function render() {
+      moduleList.innerHTML = "";
+      modules.forEach((item, index) => {
+        const li = document.createElement("li");
+        const btn = document.createElement("button");
+        btn.textContent = item.name || ("模块" + (index + 1));
+        if (index === active) btn.classList.add("active");
+        btn.onclick = () => {
+          active = index;
+          render();
+        };
+        li.appendChild(btn);
+        moduleList.appendChild(li);
+      });
+
+      const module = modules[active] || modules[0] || { name: "核心模块", features: [] };
+      moduleTitle.textContent = module.name || "模块详情";
+      moduleFeatures.innerHTML = "";
+      (module.features || []).forEach((feature) => {
+        const tag = document.createElement("span");
+        tag.textContent = feature;
+        moduleFeatures.appendChild(tag);
+      });
+
+      const tableName = tables[active] || tables[0];
+      tableTitle.textContent = "数据预览 · " + tableName;
+      tableBody.innerHTML = "";
+      (mockData[tableName] || []).forEach((row) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = "<td>" + row.id + "</td><td>" + row.name + "</td><td><span class='status'>" + row.status + "</span></td><td>" + row.createdAt + "</td>";
+        tableBody.appendChild(tr);
+      });
     }
-  },
-  methods: {
-    getStatusColor(status) {
-      if (!status) return 'blue';
-      const s = String(status);
-      if (s.includes('正常') || s.includes('成功') || s.includes('已归还') || s.includes('在库') || s.includes('上架')) return 'green';
-      if (s.includes('借阅') || s.includes('处理') || s.includes('待')) return 'yellow';
-      if (s.includes('禁用') || s.includes('借出') || s.includes('过期')) return 'red';
-      return 'blue';
-    },
-    showToast(msg) {
-      this.toast = msg;
-      setTimeout(() => { this.toast = ''; }, 2000);
-    },
-    showAddHint() { this.showToast('✨ 新增功能演示 — 实际项目中将弹出表单'); },
-    showEditHint(row) { this.showToast('✏️ 编辑: ' + (row.name || row.title || row.username || 'ID ' + row.id)); },
-    showDeleteHint(row) { this.showToast('🗑️ 删除: ' + (row.name || row.title || row.username || 'ID ' + row.id)); }
-  }
-}).mount('#app');
-<\/script>
+
+    render();
+  </script>
 </body>
 </html>`;
 }
 
+function runtimeInfoPage(config: {
+  title: string;
+  desc: string;
+  autoRefreshMs?: number;
+}) {
+  const autoRefreshScript = config.autoRefreshMs
+    ? `setTimeout(() => location.reload(), ${config.autoRefreshMs});`
+    : "";
+
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${config.title}</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f8fafc;
+      color: #0f172a;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      box-sizing: border-box;
+    }
+    .card {
+      width: min(560px, 100%);
+      border: 1px solid #e2e8f0;
+      background: #fff;
+      border-radius: 12px;
+      padding: 20px 18px;
+      box-shadow: 0 12px 30px rgba(2, 6, 23, 0.08);
+    }
+    h1 {
+      margin: 0 0 8px 0;
+      font-size: 18px;
+    }
+    p {
+      margin: 0;
+      color: #334155;
+      line-height: 1.6;
+      font-size: 14px;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <section class="card">
+    <h1>${config.title}</h1>
+    <p>${config.desc}</p>
+  </section>
+  <script>${autoRefreshScript}</script>
+</body>
+</html>`;
+}
+
+function readRuntimeMeta(result: unknown): {
+  queuePosition: number;
+  queueTotal: number;
+  sessionExpiresAt: string | null;
+} {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return {
+      queuePosition: 0,
+      queueTotal: 0,
+      sessionExpiresAt: null,
+    };
+  }
+  const root = result as Record<string, unknown>;
+  const runtime =
+    root.runtimePreview &&
+    typeof root.runtimePreview === "object" &&
+    !Array.isArray(root.runtimePreview)
+      ? (root.runtimePreview as Record<string, unknown>)
+      : {};
+  return {
+    queuePosition:
+      typeof runtime.queuePosition === "number" && Number.isFinite(runtime.queuePosition)
+        ? Math.max(0, Math.floor(runtime.queuePosition))
+        : 0,
+    queueTotal:
+      typeof runtime.queueTotal === "number" && Number.isFinite(runtime.queueTotal)
+        ? Math.max(0, Math.floor(runtime.queueTotal))
+        : 0,
+    sessionExpiresAt:
+      typeof runtime.sessionExpiresAt === "string" && runtime.sessionExpiresAt.trim()
+        ? runtime.sessionExpiresAt.trim()
+        : null,
+  };
+}
+
+function runtimeDecoratedHtml(html: string, expiresAt: string | null) {
+  if (!expiresAt) return html;
+
+  const banner = `<div id="runtime-banner" style="position:fixed;top:12px;right:12px;z-index:9999;background:#0ea5e9;color:#fff;padding:8px 12px;border-radius:999px;font-size:12px;box-shadow:0 8px 20px rgba(14,165,233,.35);">运行预览剩余：计算中...</div>
+<script>
+  (function(){
+    var target = new Date(${JSON.stringify(expiresAt)}).getTime();
+    var el = document.getElementById("runtime-banner");
+    if (!el || !target || Number.isNaN(target)) return;
+    function tick() {
+      var left = Math.max(0, Math.ceil((target - Date.now()) / 1000));
+      var m = Math.floor(left / 60);
+      var s = left % 60;
+      el.textContent = "运行预览剩余：" + m + "m " + s + "s";
+      if (left <= 0) {
+        el.textContent = "运行时段已结束，页面将刷新";
+        setTimeout(function(){ location.reload(); }, 1500);
+      }
+    }
+    tick();
+    setInterval(tick, 1000);
+  })();
+</script>`;
+
+  if (html.includes("</body>")) {
+    return html.replace("</body>", `${banner}</body>`);
+  }
+  return `${html}${banner}`;
+}
+
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { session, error: authError } = await requireAuth();
   if (authError) return new Response("未授权", { status: 401 });
 
   const { id } = await params;
+  const workspace = await db.workspace.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      userId: true,
+      name: true,
+      topic: true,
+      requirements: true,
+      techStack: true,
+    },
+  });
 
-  const workspace = await db.workspace.findUnique({ where: { id } });
   if (!workspace) return new Response("工作空间不存在", { status: 404 });
   if (workspace.userId !== session!.user.id && session!.user.role !== "ADMIN") {
     return new Response("无权限", { status: 403 });
   }
 
+  const url = new URL(req.url);
+  const runtimeMode = url.searchParams.get("runtime") === "1";
+  const runtimeJobId = (url.searchParams.get("jobId") || "").trim();
+  const normalizedTechStack = normalizeTechStack(workspace.techStack);
+
+  if (runtimeMode) {
+    await syncRuntimePreviewQueue();
+
+    if (!runtimeJobId) {
+      return new Response(
+        runtimeInfoPage({
+          title: "缺少运行任务",
+          desc: "未传入运行预览任务参数，请返回后重新点击“启动运行预览”。",
+        }),
+        {
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "X-Frame-Options": "SAMEORIGIN",
+          },
+        }
+      );
+    }
+
+    const previewJob = await db.taskJob.findFirst({
+      where: {
+        id: runtimeJobId,
+        workspaceId: id,
+        type: "PREVIEW",
+      },
+      select: {
+        id: true,
+        status: true,
+        result: true,
+      },
+    });
+
+    if (!previewJob) {
+      return new Response(
+        runtimeInfoPage({
+          title: "运行任务不存在",
+          desc: "当前运行预览任务不存在，可能已失效，请重新发起。",
+        }),
+        {
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "X-Frame-Options": "SAMEORIGIN",
+          },
+        }
+      );
+    }
+
+    const runtimeMeta = readRuntimeMeta(previewJob.result);
+    if (previewJob.status === "PENDING") {
+      return new Response(
+        runtimeInfoPage({
+          title: "排队中",
+          desc:
+            runtimeMeta.queuePosition > 0
+              ? `你已进入运行队列：第 ${runtimeMeta.queuePosition} 位（队列总计 ${runtimeMeta.queueTotal}）。\n请保持当前页面，系统会自动刷新。`
+              : "你已进入运行队列，请稍候，系统会自动刷新。",
+          autoRefreshMs: 2000,
+        }),
+        {
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "X-Frame-Options": "SAMEORIGIN",
+          },
+        }
+      );
+    }
+
+    if (previewJob.status !== "RUNNING") {
+      return new Response(
+        runtimeInfoPage({
+          title: "运行已结束",
+          desc: "当前运行预览时段已结束，可重新排队启动。",
+        }),
+        {
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "X-Frame-Options": "SAMEORIGIN",
+          },
+        }
+      );
+    }
+
+    const html = buildPreviewHTML({
+      name: workspace.name,
+      topic: workspace.topic,
+      requirements: normalizeRequirements(workspace.requirements),
+      techStack: normalizedTechStack,
+    });
+
+    return new Response(runtimeDecoratedHtml(html, runtimeMeta.sessionExpiresAt), {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "X-Frame-Options": "SAMEORIGIN",
+      },
+    });
+  }
+
   const html = buildPreviewHTML({
     name: workspace.name,
     topic: workspace.topic,
-    techStack: (workspace.techStack as Record<string, string>) || {},
-    requirements: (workspace.requirements as Requirements) || {},
+    requirements: normalizeRequirements(workspace.requirements),
+    techStack: normalizedTechStack,
   });
 
   return new Response(html, {

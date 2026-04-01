@@ -1,6 +1,8 @@
 import { db } from "@/lib/db";
 import { success, error } from "@/lib/api-response";
 import { requireAuth } from "@/lib/auth-helpers";
+import { getPlatformConfig } from "@/lib/system-config";
+import { hasUserRecharged } from "@/lib/user-entitlements";
 
 type MajorCategory = "computer" | "non-computer";
 
@@ -15,6 +17,8 @@ function getMajorCategoryLabel(majorCategory: MajorCategory): string {
 export async function POST(req: Request) {
   const { session, error: authError } = await requireAuth();
   if (authError) return authError;
+  const userId = session!.user.id;
+  const isAdmin = session!.user.role === "ADMIN";
 
   try {
     const body = await req.json();
@@ -36,10 +40,32 @@ export async function POST(req: Request) {
     if (!name || !topic) {
       return error("请输入项目名称和选题", 400);
     }
+    if (!isAdmin) {
+      const [platformConfig, recharged] = await Promise.all([
+        getPlatformConfig().catch(() => null),
+        hasUserRecharged(userId),
+      ]);
+
+      if (!recharged) {
+        const freeWorkspaceLimit = Math.max(
+          1,
+          Number(platformConfig?.freeWorkspaceLimit ?? 3)
+        );
+        const workspaceCount = await db.workspace.count({
+          where: { userId },
+        });
+        if (workspaceCount >= freeWorkspaceLimit) {
+          return error(
+            `免费用户最多可创建 ${freeWorkspaceLimit} 个工作空间，充值后可继续创建。`,
+            403
+          );
+        }
+      }
+    }
 
     const workspace = await db.workspace.create({
       data: {
-        userId: session!.user.id,
+        userId,
         name,
         topic,
         techStack,

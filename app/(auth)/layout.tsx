@@ -1,11 +1,18 @@
 import { Code2, Sparkles } from "lucide-react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { getSession } from "@/lib/auth-helpers";
 
-export default function AuthLayout({
+export default async function AuthLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const session = await getSession();
+  if (session?.user) {
+    redirect(session.user.role === "ADMIN" ? "/admin" : "/dashboard");
+  }
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-[linear-gradient(180deg,#f9fcff_0%,#f2f7fd_45%,#eef3f9_100%)]">
       <div className="pointer-events-none absolute -left-24 top-12 h-80 w-80 rounded-full bg-cyan-300/20 blur-3xl" />

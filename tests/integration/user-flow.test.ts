@@ -11,17 +11,23 @@ const {
   userCreateMock,
   workspaceCreateMock,
   workspaceFindManyMock,
+  workspaceCountMock,
   hashMock,
   generateNicknameMock,
   requireAuthMock,
+  getPlatformConfigMock,
+  hasUserRechargedMock,
 } = vi.hoisted(() => ({
   userFindUniqueMock: vi.fn(),
   userCreateMock: vi.fn(),
   workspaceCreateMock: vi.fn(),
   workspaceFindManyMock: vi.fn(),
+  workspaceCountMock: vi.fn(),
   hashMock: vi.fn(),
   generateNicknameMock: vi.fn(),
   requireAuthMock: vi.fn(),
+  getPlatformConfigMock: vi.fn(),
+  hasUserRechargedMock: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -33,6 +39,7 @@ vi.mock("@/lib/db", () => ({
     workspace: {
       create: workspaceCreateMock,
       findMany: workspaceFindManyMock,
+      count: workspaceCountMock,
     },
   },
 }));
@@ -52,6 +59,14 @@ vi.mock("@/lib/auth-helpers", () => ({
   requireAuth: requireAuthMock,
 }));
 
+vi.mock("@/lib/system-config", () => ({
+  getPlatformConfig: getPlatformConfigMock,
+}));
+
+vi.mock("@/lib/user-entitlements", () => ({
+  hasUserRecharged: hasUserRechargedMock,
+}));
+
 vi.mock("@/lib/sms/provider", () => ({
   checkCode: vi.fn(),
 }));
@@ -68,9 +83,12 @@ describe("integration: register -> create workspace -> list workspace", () => {
     userCreateMock.mockReset();
     workspaceCreateMock.mockReset();
     workspaceFindManyMock.mockReset();
+    workspaceCountMock.mockReset();
     hashMock.mockReset();
     generateNicknameMock.mockReset();
     requireAuthMock.mockReset();
+    getPlatformConfigMock.mockReset();
+    hasUserRechargedMock.mockReset();
 
     hashMock.mockResolvedValue("hashed-password");
     generateNicknameMock.mockReturnValue("测试昵称0001");
@@ -105,6 +123,13 @@ describe("integration: register -> create workspace -> list workspace", () => {
     workspaceFindManyMock.mockImplementation(async ({ where }: { where: { userId: string } }) => {
       return workspaces.filter((w) => w.userId === where.userId);
     });
+
+    workspaceCountMock.mockImplementation(async ({ where }: { where: { userId: string } }) => {
+      return workspaces.filter((w) => w.userId === where.userId).length;
+    });
+
+    getPlatformConfigMock.mockResolvedValue({ freeWorkspaceLimit: 3 });
+    hasUserRechargedMock.mockResolvedValue(false);
 
     requireAuthMock.mockImplementation(async () => {
       const currentUser = users[0];
