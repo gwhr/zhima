@@ -9,6 +9,11 @@ import {
   Shield,
   Clock,
   ArrowRight,
+  GraduationCap,
+  Layers3,
+  ClipboardCheck,
+  MessageSquareHeart,
+  Rocket,
 } from "lucide-react";
 
 const features = [
@@ -42,6 +47,38 @@ const features = [
     title: "效率提升工具",
     desc: "减少重复劳动，把更多时间留给思考、实验和打磨，提升毕设推进效率。",
   },
+];
+
+const highlights = [
+  {
+    icon: GraduationCap,
+    title: "毕设辅导定位",
+    desc: "平台提供思路和工具，帮助你把“能做”提升到“做好”，核心成果仍由你主导完成。",
+  },
+  {
+    icon: Layers3,
+    title: "全链路协同",
+    desc: "从选题、功能拆解、代码草稿、论文提纲到图表资料，形成连续的推进链路。",
+  },
+  {
+    icon: ClipboardCheck,
+    title: "过程可控",
+    desc: "每一步都有状态反馈和结果预览，避免盲等、误操作和反复返工。",
+  },
+];
+
+const processSteps = [
+  "选题与需求确认：明确业务场景、角色、模块、技术栈。",
+  "生成项目代码：产出可用于学习和开发的完整项目脚手架与示例实现。",
+  "预览与讨论修改：基于结果继续问答，按导师要求逐轮完善。",
+  "论文与图表整理：按学校规范组织结构化内容，辅助你完成最终提交。",
+];
+
+const deliverables = [
+  "可下载项目源码（按后端/前端/数据库分类预览）",
+  "论文结构化稿件与图表参考材料",
+  "任务队列与状态反馈，支持中断、重试与继续",
+  "一对一辅导入口（选题把关、部署排错、答辩材料建议）",
 ];
 
 const faqs = [
@@ -99,6 +136,10 @@ export default function MarketingHome() {
             智码聚焦毕业设计辅导场景，提供需求拆解、代码示例、论文结构和图表参考，
             帮助你在导师要求下独立完成项目。
           </p>
+          <p className="mx-auto mt-4 max-w-2xl text-sm text-muted-foreground">
+            当前版本定位为“毕设助手/毕设辅导工具”，用于学习、开发与写作支持，
+            不替代学生本人完成学业任务。
+          </p>
           <div className="mt-8 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
             <Button size="lg" asChild>
               <Link href="/register">
@@ -110,6 +151,22 @@ export default function MarketingHome() {
               <Link href="#features">了解更多</Link>
             </Button>
           </div>
+        </div>
+      </section>
+
+      <section className="border-t py-16">
+        <div className="mx-auto grid max-w-6xl gap-6 px-4 md:grid-cols-3">
+          {highlights.map((item) => (
+            <Card key={item.title} className="border-0 shadow-sm">
+              <CardContent className="pt-6">
+                <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                  <item.icon className="h-5 w-5 text-primary" />
+                </div>
+                <h3 className="text-lg font-semibold">{item.title}</h3>
+                <p className="mt-2 text-sm text-muted-foreground">{item.desc}</p>
+              </CardContent>
+            </Card>
+          ))}
         </div>
       </section>
 
@@ -138,6 +195,67 @@ export default function MarketingHome() {
               </Card>
             ))}
           </div>
+        </div>
+      </section>
+
+      <section className="border-t py-20">
+        <div className="mx-auto grid max-w-6xl gap-8 px-4 lg:grid-cols-2">
+          <Card className="border-0 shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-2xl">使用流程清晰可控</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {processSteps.map((step, index) => (
+                <div key={step} className="flex items-start gap-3 rounded-lg bg-muted/40 px-3 py-2 text-sm">
+                  <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                    {index + 1}
+                  </span>
+                  <span>{step}</span>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-2xl">你将获得什么</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {deliverables.map((item) => (
+                <div key={item} className="flex items-start gap-2 text-sm">
+                  <Rocket className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                  <span className="text-muted-foreground">{item}</span>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+
+      <section className="border-t bg-muted/30 py-20">
+        <div className="mx-auto max-w-4xl px-4">
+          <Card className="border-0 shadow-sm">
+            <CardContent className="grid gap-6 p-6 md:grid-cols-[1fr_auto] md:items-center">
+              <div>
+                <div className="mb-2 inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground">
+                  <MessageSquareHeart className="h-3.5 w-3.5 text-primary" />
+                  一对一辅导
+                </div>
+                <h3 className="text-2xl font-semibold">遇到卡点可直接咨询</h3>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  提供选题把关、部署排错、项目结构优化、答辩材料梳理建议。二维码可在管理后台替换为你的正式客服渠道。
+                </p>
+              </div>
+              <div className="rounded-xl border bg-white p-3 shadow-sm">
+                <img
+                  src="/support-qr-placeholder.svg"
+                  alt="一对一辅导二维码占位图"
+                  className="h-40 w-40 rounded object-contain"
+                />
+                <p className="mt-2 text-center text-xs text-muted-foreground">扫码咨询（占位图）</p>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </section>
 

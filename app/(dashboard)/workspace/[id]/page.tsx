@@ -467,10 +467,12 @@ export default function WorkspaceDetailPage() {
       )
     : 0;
   const showSupportCard =
-    (platformPolicy?.supportContactEnabled ?? false) &&
+    (platformPolicy?.supportContactEnabled ?? true) &&
     (platformPolicy?.supportContactTitle ||
       platformPolicy?.supportContactDescription ||
       platformPolicy?.supportContactQrUrl);
+  const supportContactQrUrl =
+    platformPolicy?.supportContactQrUrl?.trim() || "/support-qr-placeholder.svg";
   const downloadNeedRecharge =
     (platformPolicy?.requireRechargeForDownload ?? false) &&
     !(platformPolicy?.hasRecharged ?? false);
@@ -1396,10 +1398,10 @@ cd backend
                   {platformPolicy?.supportContactDescription ||
                     "可联系客服获取选题把关、部署排错、答辩材料梳理等一对一支持。"}
                 </p>
-                {platformPolicy?.supportContactQrUrl ? (
+                {supportContactQrUrl ? (
                   <div className="rounded-lg border bg-white p-2">
                     <img
-                      src={platformPolicy.supportContactQrUrl}
+                      src={supportContactQrUrl}
                       alt="客服二维码"
                       className="mx-auto h-40 w-40 rounded object-contain"
                     />

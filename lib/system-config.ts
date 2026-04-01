@@ -111,14 +111,15 @@ export function getDefaultPlatformConfigFromEnv(): PlatformConfig {
     maintenanceNoticeText: process.env.MAINTENANCE_NOTICE_TEXT || "",
     supportContactEnabled: parseBoolean(
       process.env.SUPPORT_CONTACT_ENABLED,
-      false
+      true
     ),
     supportContactTitle:
       process.env.SUPPORT_CONTACT_TITLE || "一对一辅导（人工）",
     supportContactDescription:
       process.env.SUPPORT_CONTACT_DESCRIPTION ||
       "可联系客服获取选题把关、部署排错、答辩材料梳理等一对一支持。",
-    supportContactQrUrl: process.env.SUPPORT_CONTACT_QR_URL || "",
+    supportContactQrUrl:
+      process.env.SUPPORT_CONTACT_QR_URL || "/support-qr-placeholder.svg",
   };
 }
 
