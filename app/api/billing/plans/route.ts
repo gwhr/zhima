@@ -1,11 +1,7 @@
 import { success } from "@/lib/api-response";
-import { plans } from "@/lib/billing/plans";
+import { listBillingPlans } from "@/lib/billing/plans";
 
 export async function GET() {
-  return success(
-    Object.entries(plans).map(([key, plan]) => ({
-      id: key,
-      ...plan,
-    }))
-  );
+  const publishedPlans = await listBillingPlans({ publishedOnly: true });
+  return success(publishedPlans);
 }

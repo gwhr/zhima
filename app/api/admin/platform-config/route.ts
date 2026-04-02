@@ -1,6 +1,11 @@
 import { requireAdmin } from "@/lib/auth-helpers";
 import { success, error } from "@/lib/api-response";
-import { getPlatformConfig, savePlatformConfig } from "@/lib/system-config";
+import {
+  TOKEN_PLAN_IDS,
+  getPlatformConfig,
+  savePlatformConfig,
+  type TokenPlanId,
+} from "@/lib/system-config";
 import { listModelOptionIds } from "@/lib/model-catalog-config";
 import { logAdminAudit } from "@/lib/admin-audit";
 
@@ -135,6 +140,56 @@ export async function PATCH(req: Request) {
       return error("homepageProcessSteps 至少需要一个有效步骤", 400);
     }
     patch.homepageProcessSteps = normalized;
+  }
+  if ("tokenRechargePlans" in body) {
+    if (!Array.isArray(body.tokenRechargePlans)) {
+      return error("tokenRechargePlans 必须为数组", 400);
+    }
+
+    const current = await getPlatformConfig();
+    const currentMap = new Map(
+      current.tokenRechargePlans.map((plan) => [plan.id, plan])
+    );
+    const nextMap = new Map<TokenPlanId, (typeof current.tokenRechargePlans)[number]>();
+
+    for (const rawItem of body.tokenRechargePlans) {
+      if (!rawItem || typeof rawItem !== "object") continue;
+      const item = rawItem as Record<string, unknown>;
+      const id = String(item.id || "").toUpperCase() as TokenPlanId;
+      if (!TOKEN_PLAN_IDS.includes(id)) continue;
+
+      const previous = currentMap.get(id);
+      const name = String(item.name || "").trim();
+      const priceYuan = Number(item.priceYuan);
+      const points = Number(item.points);
+      const description = String(item.description || "").trim();
+      const published = Boolean(item.published);
+
+      if (!name) {
+        return error(`套餐 ${id} 名称不能为空`, 400);
+      }
+      if (!Number.isFinite(priceYuan) || priceYuan <= 0) {
+        return error(`套餐 ${id} 价格必须大于 0`, 400);
+      }
+      if (!Number.isFinite(points) || points <= 0) {
+        return error(`套餐 ${id} 点数必须大于 0`, 400);
+      }
+
+      nextMap.set(id, {
+        id,
+        name,
+        priceYuan: Number(priceYuan.toFixed(2)),
+        points: Math.floor(points),
+        description: description || previous?.description || "",
+        published,
+      });
+    }
+
+    patch.tokenRechargePlans = TOKEN_PLAN_IDS.map((id) => {
+      const nextItem = nextMap.get(id);
+      if (nextItem) return nextItem;
+      return currentMap.get(id)!;
+    });
   }
 
   const beforeConfig = await getPlatformConfig();

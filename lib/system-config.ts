@@ -9,6 +9,18 @@ export interface HomepageProcessStep {
   imageUrl: string;
 }
 
+export const TOKEN_PLAN_IDS = ["BASIC", "STANDARD", "PREMIUM"] as const;
+export type TokenPlanId = (typeof TOKEN_PLAN_IDS)[number];
+
+export interface TokenRechargePlanConfig {
+  id: TokenPlanId;
+  name: string;
+  priceYuan: number;
+  points: number;
+  description: string;
+  published: boolean;
+}
+
 export interface PlatformConfig {
   codeGenModelId: string;
   thesisGenModelId: string;
@@ -37,6 +49,7 @@ export interface PlatformConfig {
   homepageProcessTitle: string;
   homepageProcessDescription: string;
   homepageProcessSteps: HomepageProcessStep[];
+  tokenRechargePlans: TokenRechargePlanConfig[];
 }
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
@@ -57,6 +70,86 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
 function parsePositiveNumber(value: string | undefined, fallback: number): number {
   const parsed = Number.parseFloat(value ?? "");
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function defaultTokenRechargePlans(): TokenRechargePlanConfig[] {
+  return [
+    {
+      id: "BASIC",
+      name: "点数包·基础",
+      priceYuan: 9.9,
+      points: 12_000,
+      description: "适合轻量体验，含基础 AI 生成点数",
+      published: true,
+    },
+    {
+      id: "STANDARD",
+      name: "点数包·标准",
+      priceYuan: 29.9,
+      points: 42_000,
+      description: "主力推荐，满足日常项目多轮生成与修改",
+      published: true,
+    },
+    {
+      id: "PREMIUM",
+      name: "点数包·高阶",
+      priceYuan: 99.9,
+      points: 160_000,
+      description: "适合重度使用，覆盖代码/论文高频生成场景",
+      published: true,
+    },
+  ];
+}
+
+function normalizeTokenRechargePlans(
+  value: unknown,
+  fallback: TokenRechargePlanConfig[]
+): TokenRechargePlanConfig[] {
+  if (!Array.isArray(value)) return fallback;
+
+  const fallbackMap = new Map(fallback.map((item) => [item.id, item]));
+  const parsedMap = new Map<TokenPlanId, TokenRechargePlanConfig>();
+
+  for (const rawItem of value) {
+    if (!rawItem || typeof rawItem !== "object") continue;
+    const item = rawItem as Record<string, unknown>;
+    const id = String(item.id ?? "").toUpperCase() as TokenPlanId;
+    if (!TOKEN_PLAN_IDS.includes(id)) continue;
+
+    const fallbackItem = fallbackMap.get(id);
+    if (!fallbackItem) continue;
+
+    const name = String(item.name ?? "").trim() || fallbackItem.name;
+    const priceYuanRaw = Number(item.priceYuan);
+    const pointsRaw = Number(item.points);
+    const priceYuan =
+      Number.isFinite(priceYuanRaw) && priceYuanRaw > 0
+        ? Number(priceYuanRaw.toFixed(2))
+        : fallbackItem.priceYuan;
+    const points =
+      Number.isFinite(pointsRaw) && pointsRaw > 0
+        ? Math.floor(pointsRaw)
+        : fallbackItem.points;
+    const description =
+      String(item.description ?? "").trim() || fallbackItem.description;
+    const published =
+      typeof item.published === "boolean"
+        ? item.published
+        : fallbackItem.published;
+
+    parsedMap.set(id, {
+      id,
+      name,
+      priceYuan,
+      points,
+      description,
+      published,
+    });
+  }
+
+  return TOKEN_PLAN_IDS.map((id) => parsedMap.get(id) || fallbackMap.get(id)!).filter(
+    Boolean
+  );
 }
 
 function defaultHomepageProcessSteps(): HomepageProcessStep[] {
@@ -106,6 +199,7 @@ function normalizeHomepageProcessSteps(
 
 export function getDefaultPlatformConfigFromEnv(): PlatformConfig {
   const defaultSteps = defaultHomepageProcessSteps();
+  const defaultRechargePlans = defaultTokenRechargePlans();
   return {
     codeGenModelId: process.env.CODE_GEN_MODEL_ID || "deepseek",
     thesisGenModelId: process.env.THESIS_GEN_MODEL_ID || "glm",
@@ -185,6 +279,7 @@ export function getDefaultPlatformConfigFromEnv(): PlatformConfig {
       process.env.HOMEPAGE_PROCESS_DESCRIPTION ||
       "跟着步骤走，小白也能快速推进到可预览、可导出的阶段。",
     homepageProcessSteps: defaultSteps,
+    tokenRechargePlans: defaultRechargePlans,
   };
 }
 
@@ -284,6 +379,10 @@ function normalizeConfig(
     homepageProcessSteps: normalizeHomepageProcessSteps(
       input.homepageProcessSteps,
       defaults.homepageProcessSteps
+    ),
+    tokenRechargePlans: normalizeTokenRechargePlans(
+      input.tokenRechargePlans,
+      defaults.tokenRechargePlans
     ),
   };
 }

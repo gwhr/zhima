@@ -7,6 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
+const TOKEN_PLAN_ORDER = ["BASIC", "STANDARD", "PREMIUM"] as const;
+type TokenPlanId = (typeof TOKEN_PLAN_ORDER)[number];
+
 interface PlatformConfig {
   codeGenModelId: string;
   thesisGenModelId: string;
@@ -39,6 +42,14 @@ interface PlatformConfig {
     description: string;
     imageUrl: string;
   }>;
+  tokenRechargePlans: Array<{
+    id: "BASIC" | "STANDARD" | "PREMIUM";
+    name: string;
+    priceYuan: number;
+    points: number;
+    description: string;
+    published: boolean;
+  }>;
 }
 
 export default function AdminPlatformPage() {
@@ -49,6 +60,14 @@ export default function AdminPlatformPage() {
   const [supportQrUploading, setSupportQrUploading] = useState(false);
   const [stepUploadingIndex, setStepUploadingIndex] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  const orderedRechargePlans = useMemo(() => {
+    if (!config) return [];
+    const map = new Map(config.tokenRechargePlans.map((plan) => [plan.id, plan]));
+    return TOKEN_PLAN_ORDER.map((id) => map.get(id)).filter(
+      (plan): plan is PlatformConfig["tokenRechargePlans"][number] => Boolean(plan)
+    );
+  }, [config]);
 
   async function uploadPlatformImage(
     file: File,
@@ -153,6 +172,21 @@ export default function AdminPlatformPage() {
             imageUrl: "",
           },
         ],
+      };
+    });
+  }
+
+  function updateRechargePlan(
+    id: TokenPlanId,
+    patch: Partial<PlatformConfig["tokenRechargePlans"][number]>
+  ) {
+    setConfig((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        tokenRechargePlans: prev.tokenRechargePlans.map((plan) =>
+          plan.id === id ? { ...plan, ...patch } : plan
+        ),
       };
     });
   }
@@ -445,6 +479,86 @@ export default function AdminPlatformPage() {
           <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
             {estimatedPointFormula}
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Token 套餐配置（可发布）</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {orderedRechargePlans.map((plan) => (
+            <div key={plan.id} className="rounded-md border p-3">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-medium">{plan.id}</p>
+                  <p className="text-xs text-muted-foreground">用户端仅显示已发布套餐</p>
+                </div>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={plan.published}
+                    onChange={(event) =>
+                      updateRechargePlan(plan.id, { published: event.target.checked })
+                    }
+                  />
+                  发布
+                </label>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <label className="space-y-1 text-sm">
+                  <span className="text-muted-foreground">套餐名称</span>
+                  <Input
+                    value={plan.name}
+                    onChange={(event) =>
+                      updateRechargePlan(plan.id, { name: event.target.value })
+                    }
+                  />
+                </label>
+
+                <label className="space-y-1 text-sm">
+                  <span className="text-muted-foreground">价格（元）</span>
+                  <Input
+                    type="number"
+                    min={0.01}
+                    step="0.01"
+                    value={plan.priceYuan}
+                    onChange={(event) =>
+                      updateRechargePlan(plan.id, {
+                        priceYuan: Number(event.target.value || 0),
+                      })
+                    }
+                  />
+                </label>
+
+                <label className="space-y-1 text-sm">
+                  <span className="text-muted-foreground">对应 Token 点数</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={plan.points}
+                    onChange={(event) =>
+                      updateRechargePlan(plan.id, {
+                        points: Number(event.target.value || 0),
+                      })
+                    }
+                  />
+                </label>
+              </div>
+
+              <label className="mt-3 block space-y-1 text-sm">
+                <span className="text-muted-foreground">套餐描述</span>
+                <Textarea
+                  value={plan.description}
+                  className="min-h-[72px]"
+                  onChange={(event) =>
+                    updateRechargePlan(plan.id, { description: event.target.value })
+                  }
+                />
+              </label>
+            </div>
+          ))}
         </CardContent>
       </Card>
 

@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { verifyNotify } from "@/lib/payment/hupijiao";
-import { plans } from "@/lib/billing/plans";
+import { getBillingPlanByType, type PlanType } from "@/lib/billing/plans";
 import { rechargeWallet } from "@/lib/billing/token-wallet";
 
 export async function POST(req: Request) {
@@ -29,7 +29,9 @@ export async function POST(req: Request) {
     return new Response("fail", { status: 400 });
   }
 
-  const plan = plans[order.planType as keyof typeof plans];
+  const plan = await getBillingPlanByType(order.planType as PlanType, {
+    includeUnpublished: true,
+  });
   if (!plan) {
     return new Response("fail", { status: 400 });
   }
