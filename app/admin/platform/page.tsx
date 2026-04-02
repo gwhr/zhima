@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,6 +31,14 @@ interface PlatformConfig {
   supportContactTitle: string;
   supportContactDescription: string;
   supportContactQrUrl: string;
+  homepageProcessEnabled: boolean;
+  homepageProcessTitle: string;
+  homepageProcessDescription: string;
+  homepageProcessSteps: Array<{
+    title: string;
+    description: string;
+    imageUrl: string;
+  }>;
 }
 
 export default function AdminPlatformPage() {
@@ -38,7 +46,28 @@ export default function AdminPlatformPage() {
   const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [supportQrUploading, setSupportQrUploading] = useState(false);
+  const [stepUploadingIndex, setStepUploadingIndex] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  async function uploadPlatformImage(
+    file: File,
+    scope: "support" | "homepage-step"
+  ) {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("scope", scope);
+
+    const response = await fetch("/api/admin/platform-assets/upload", {
+      method: "POST",
+      body: formData,
+    });
+    const result = await response.json();
+    if (!result.success || !result.data?.url) {
+      throw new Error(result.error || "图片上传失败");
+    }
+    return String(result.data.url);
+  }
 
   async function loadConfig() {
     setLoading(true);
@@ -77,6 +106,104 @@ export default function AdminPlatformPage() {
       setMessage(saveError instanceof Error ? saveError.message : "保存失败");
     } finally {
       setSaving(false);
+    }
+  }
+
+  function updateProcessStep(
+    index: number,
+    patch: Partial<PlatformConfig["homepageProcessSteps"][number]>
+  ) {
+    setConfig((prev) => {
+      if (!prev) return prev;
+      const nextSteps = [...prev.homepageProcessSteps];
+      const current = nextSteps[index];
+      if (!current) return prev;
+      nextSteps[index] = { ...current, ...patch };
+      return {
+        ...prev,
+        homepageProcessSteps: nextSteps,
+      };
+    });
+  }
+
+  function removeProcessStep(index: number) {
+    setConfig((prev) => {
+      if (!prev) return prev;
+      if (prev.homepageProcessSteps.length <= 1) return prev;
+      return {
+        ...prev,
+        homepageProcessSteps: prev.homepageProcessSteps.filter(
+          (_, stepIndex) => stepIndex !== index
+        ),
+      };
+    });
+  }
+
+  function addProcessStep() {
+    setConfig((prev) => {
+      if (!prev) return prev;
+      if (prev.homepageProcessSteps.length >= 8) return prev;
+      return {
+        ...prev,
+        homepageProcessSteps: [
+          ...prev.homepageProcessSteps,
+          {
+            title: `步骤 ${prev.homepageProcessSteps.length + 1}`,
+            description: "请补充该步骤说明",
+            imageUrl: "",
+          },
+        ],
+      };
+    });
+  }
+
+  async function handleSupportQrUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !config) return;
+
+    setSupportQrUploading(true);
+    setMessage(null);
+    try {
+      const url = await uploadPlatformImage(file, "support");
+      setConfig((prev) =>
+        prev
+          ? {
+              ...prev,
+              supportContactQrUrl: url,
+            }
+          : prev
+      );
+      setMessage("二维码上传成功，请记得保存配置");
+    } catch (uploadError) {
+      setMessage(
+        uploadError instanceof Error ? uploadError.message : "二维码上传失败"
+      );
+    } finally {
+      setSupportQrUploading(false);
+    }
+  }
+
+  async function handleProcessStepImageUpload(
+    index: number,
+    event: ChangeEvent<HTMLInputElement>
+  ) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setStepUploadingIndex(index);
+    setMessage(null);
+    try {
+      const url = await uploadPlatformImage(file, "homepage-step");
+      updateProcessStep(index, { imageUrl: url });
+      setMessage(`步骤 ${index + 1} 图片上传成功，请记得保存配置`);
+    } catch (uploadError) {
+      setMessage(
+        uploadError instanceof Error ? uploadError.message : "流程图片上传失败"
+      );
+    } finally {
+      setStepUploadingIndex(null);
     }
   }
 
@@ -537,10 +664,10 @@ export default function AdminPlatformPage() {
             </label>
 
             <label className="space-y-1 text-sm">
-              <span className="text-muted-foreground">二维码图片地址（HTTPS）</span>
+              <span className="text-muted-foreground">二维码图片地址</span>
               <Input
                 value={config.supportContactQrUrl}
-                placeholder="https://..."
+                placeholder="/api/platform-assets/..."
                 onChange={(event) =>
                   setConfig((prev) =>
                     prev
@@ -552,6 +679,18 @@ export default function AdminPlatformPage() {
                   )
                 }
               />
+              <div className="flex items-center gap-2">
+                <Input
+                  type="file"
+                  accept="image/*"
+                  onChange={(event) => void handleSupportQrUpload(event)}
+                  disabled={supportQrUploading}
+                  className="h-9"
+                />
+                {supportQrUploading && (
+                  <span className="text-xs text-muted-foreground">上传中...</span>
+                )}
+              </div>
             </label>
           </div>
 
@@ -572,6 +711,157 @@ export default function AdminPlatformPage() {
               }
             />
           </label>
+
+          {config.supportContactQrUrl ? (
+            <div className="inline-flex max-w-[220px] flex-col gap-2 rounded-md border bg-muted/30 p-2">
+              <img
+                src={config.supportContactQrUrl}
+                alt="辅导二维码预览"
+                className="h-40 w-40 rounded object-contain"
+              />
+              <span className="text-xs text-muted-foreground">二维码预览</span>
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">首页操作流程模块</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={config.homepageProcessEnabled}
+              onChange={(event) =>
+                setConfig((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        homepageProcessEnabled: event.target.checked,
+                      }
+                    : prev
+                )
+              }
+            />
+            在首页展示“操作流程”模块
+          </label>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">模块标题</span>
+              <Input
+                value={config.homepageProcessTitle}
+                onChange={(event) =>
+                  setConfig((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          homepageProcessTitle: event.target.value,
+                        }
+                      : prev
+                  )
+                }
+              />
+            </label>
+          </div>
+
+          <label className="space-y-1 text-sm block">
+            <span className="text-muted-foreground">模块描述</span>
+            <Textarea
+              value={config.homepageProcessDescription}
+              className="min-h-[72px]"
+              onChange={(event) =>
+                setConfig((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        homepageProcessDescription: event.target.value,
+                      }
+                    : prev
+                )
+              }
+            />
+          </label>
+
+          <div className="space-y-3">
+            {config.homepageProcessSteps.map((step, index) => (
+              <div key={`${index}-${step.title}`} className="rounded-md border p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <h3 className="text-sm font-medium">步骤 {index + 1}</h3>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => removeProcessStep(index)}
+                    disabled={config.homepageProcessSteps.length <= 1}
+                  >
+                    删除
+                  </Button>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="space-y-1 text-sm">
+                    <span className="text-muted-foreground">步骤标题</span>
+                    <Input
+                      value={step.title}
+                      onChange={(event) =>
+                        updateProcessStep(index, { title: event.target.value })
+                      }
+                    />
+                  </label>
+
+                  <label className="space-y-1 text-sm">
+                    <span className="text-muted-foreground">步骤配图地址</span>
+                    <Input
+                      value={step.imageUrl}
+                      placeholder="/api/platform-assets/..."
+                      onChange={(event) =>
+                        updateProcessStep(index, { imageUrl: event.target.value })
+                      }
+                    />
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="file"
+                        accept="image/*"
+                        className="h-9"
+                        onChange={(event) =>
+                          void handleProcessStepImageUpload(index, event)
+                        }
+                        disabled={stepUploadingIndex === index}
+                      />
+                      {stepUploadingIndex === index && (
+                        <span className="text-xs text-muted-foreground">
+                          上传中...
+                        </span>
+                      )}
+                    </div>
+                  </label>
+                </div>
+
+                <label className="mt-3 block space-y-1 text-sm">
+                  <span className="text-muted-foreground">步骤说明</span>
+                  <Textarea
+                    value={step.description}
+                    className="min-h-[72px]"
+                    onChange={(event) =>
+                      updateProcessStep(index, { description: event.target.value })
+                    }
+                  />
+                </label>
+              </div>
+            ))}
+          </div>
+
+          <Button
+            type="button"
+            variant="outline"
+            onClick={addProcessStep}
+            disabled={config.homepageProcessSteps.length >= 8}
+          >
+            新增步骤
+          </Button>
         </CardContent>
       </Card>
 

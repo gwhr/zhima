@@ -39,6 +39,14 @@ export default function LoginPage() {
 
   function ensureAgreementAccepted() {
     if (agreementAccepted) return true;
+    const confirmed = window.confirm(
+      "继续操作需要同意《用户协议》和《隐私政策》，是否同意并继续？"
+    );
+    if (confirmed) {
+      setAgreementAccepted(true);
+      setError("");
+      return true;
+    }
     setError("请先阅读并同意《用户协议》和《隐私政策》");
     return false;
   }
@@ -207,7 +215,7 @@ export default function LoginPage() {
             </CardContent>
             <CardFooter className="flex flex-col gap-3">
               {agreementBlock}
-              <Button type="submit" className="w-full" disabled={loading || !agreementAccepted}>
+              <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? "登录中..." : "登录"}
               </Button>
             </CardFooter>
@@ -245,7 +253,7 @@ export default function LoginPage() {
                     variant="outline"
                     className="w-28 shrink-0"
                     onClick={sendCode}
-                    disabled={codeSending || countdown > 0 || !agreementAccepted}
+                    disabled={codeSending || countdown > 0}
                   >
                     {countdown > 0 ? `${countdown}s` : codeSending ? "发送中" : "获取验证码"}
                   </Button>
@@ -254,7 +262,7 @@ export default function LoginPage() {
             </CardContent>
             <CardFooter className="flex flex-col gap-3">
               {agreementBlock}
-              <Button type="submit" className="w-full" disabled={loading || !agreementAccepted}>
+              <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? "登录中..." : "登录"}
               </Button>
             </CardFooter>

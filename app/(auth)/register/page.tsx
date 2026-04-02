@@ -55,6 +55,14 @@ export default function RegisterPage() {
 
   function ensureAgreementAccepted() {
     if (agreementAccepted) return true;
+    const confirmed = window.confirm(
+      "继续操作需要同意《用户协议》和《隐私政策》，是否同意并继续？"
+    );
+    if (confirmed) {
+      setAgreementAccepted(true);
+      setError("");
+      return true;
+    }
     setError("请先阅读并同意《用户协议》和《隐私政策》");
     return false;
   }
@@ -308,7 +316,7 @@ export default function RegisterPage() {
                     variant="outline"
                     className="w-28 shrink-0"
                     onClick={sendEmailCode}
-                    disabled={emailCodeSending || emailCountdown > 0 || !agreementAccepted}
+                    disabled={emailCodeSending || emailCountdown > 0}
                   >
                     {emailCountdown > 0
                       ? `${emailCountdown}s`
@@ -359,7 +367,7 @@ export default function RegisterPage() {
 
             <CardFooter className="flex flex-col gap-3">
               {agreementBlock}
-              <Button type="submit" className="w-full" disabled={loading || !agreementAccepted}>
+              <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? "注册中..." : "注册"}
               </Button>
             </CardFooter>
@@ -408,7 +416,7 @@ export default function RegisterPage() {
                     variant="outline"
                     className="w-28 shrink-0"
                     onClick={sendPhoneCode}
-                    disabled={smsCodeSending || smsCountdown > 0 || !agreementAccepted}
+                    disabled={smsCodeSending || smsCountdown > 0}
                   >
                     {smsCountdown > 0
                       ? `${smsCountdown}s`
@@ -433,7 +441,7 @@ export default function RegisterPage() {
 
             <CardFooter className="flex flex-col gap-3">
               {agreementBlock}
-              <Button type="submit" className="w-full" disabled={loading || !agreementAccepted}>
+              <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? "注册中..." : "注册"}
               </Button>
             </CardFooter>

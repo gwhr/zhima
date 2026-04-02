@@ -3,6 +3,12 @@ import type { Prisma } from "@prisma/client";
 
 const PLATFORM_CONFIG_KEY = "platform:settings";
 
+export interface HomepageProcessStep {
+  title: string;
+  description: string;
+  imageUrl: string;
+}
+
 export interface PlatformConfig {
   codeGenModelId: string;
   thesisGenModelId: string;
@@ -27,6 +33,10 @@ export interface PlatformConfig {
   supportContactTitle: string;
   supportContactDescription: string;
   supportContactQrUrl: string;
+  homepageProcessEnabled: boolean;
+  homepageProcessTitle: string;
+  homepageProcessDescription: string;
+  homepageProcessSteps: HomepageProcessStep[];
 }
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
@@ -49,7 +59,53 @@ function parsePositiveNumber(value: string | undefined, fallback: number): numbe
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function defaultHomepageProcessSteps(): HomepageProcessStep[] {
+  return [
+    {
+      title: "选择题目",
+      description: "输入业务方向关键词，让系统推荐可落地的毕设题目。",
+      imageUrl: "",
+    },
+    {
+      title: "确认功能与技术栈",
+      description: "按题目确认角色、功能模块、数据库与前后端技术栈。",
+      imageUrl: "",
+    },
+    {
+      title: "生成代码与论文",
+      description: "分步生成项目代码、论文草稿和图表素材，支持继续追问优化。",
+      imageUrl: "",
+    },
+    {
+      title: "预览、导出与提交",
+      description: "在线预览全量文件，导出压缩包后本地运行并按导师要求完善。",
+      imageUrl: "",
+    },
+  ];
+}
+
+function normalizeHomepageProcessSteps(
+  value: unknown,
+  fallback: HomepageProcessStep[]
+): HomepageProcessStep[] {
+  if (!Array.isArray(value)) return fallback;
+  const normalized = value
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const raw = item as Record<string, unknown>;
+      const title = String(raw.title ?? "").trim();
+      const description = String(raw.description ?? "").trim();
+      const imageUrl = String(raw.imageUrl ?? "").trim();
+      if (!title || !description) return null;
+      return { title, description, imageUrl };
+    })
+    .filter((item): item is HomepageProcessStep => Boolean(item))
+    .slice(0, 8);
+  return normalized.length ? normalized : fallback;
+}
+
 export function getDefaultPlatformConfigFromEnv(): PlatformConfig {
+  const defaultSteps = defaultHomepageProcessSteps();
   return {
     codeGenModelId: process.env.CODE_GEN_MODEL_ID || "deepseek",
     thesisGenModelId: process.env.THESIS_GEN_MODEL_ID || "glm",
@@ -120,6 +176,15 @@ export function getDefaultPlatformConfigFromEnv(): PlatformConfig {
       "可联系客服获取选题把关、部署排错、答辩材料梳理等一对一支持。",
     supportContactQrUrl:
       process.env.SUPPORT_CONTACT_QR_URL || "/support-qr-placeholder.svg",
+    homepageProcessEnabled: parseBoolean(
+      process.env.HOMEPAGE_PROCESS_ENABLED,
+      true
+    ),
+    homepageProcessTitle: process.env.HOMEPAGE_PROCESS_TITLE || "操作流程",
+    homepageProcessDescription:
+      process.env.HOMEPAGE_PROCESS_DESCRIPTION ||
+      "跟着步骤走，小白也能快速推进到可预览、可导出的阶段。",
+    homepageProcessSteps: defaultSteps,
   };
 }
 
@@ -204,6 +269,22 @@ function normalizeConfig(
       typeof input.supportContactQrUrl === "string"
         ? input.supportContactQrUrl
         : defaults.supportContactQrUrl,
+    homepageProcessTitle:
+      typeof input.homepageProcessTitle === "string"
+        ? input.homepageProcessTitle
+        : defaults.homepageProcessTitle,
+    homepageProcessDescription:
+      typeof input.homepageProcessDescription === "string"
+        ? input.homepageProcessDescription
+        : defaults.homepageProcessDescription,
+    homepageProcessEnabled:
+      typeof input.homepageProcessEnabled === "boolean"
+        ? input.homepageProcessEnabled
+        : defaults.homepageProcessEnabled,
+    homepageProcessSteps: normalizeHomepageProcessSteps(
+      input.homepageProcessSteps,
+      defaults.homepageProcessSteps
+    ),
   };
 }
 

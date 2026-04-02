@@ -1,19 +1,23 @@
 import Link from "next/link";
+import { getServerSession } from "next-auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { authOptions } from "@/lib/auth";
+import { getPlatformConfig } from "@/lib/system-config";
 import {
+  ArrowRight,
+  BarChart3,
+  ClipboardCheck,
+  Clock,
   Code2,
   FileText,
-  BarChart3,
-  Zap,
-  Shield,
-  Clock,
-  ArrowRight,
   GraduationCap,
   Layers3,
-  ClipboardCheck,
   MessageSquareHeart,
   Rocket,
+  Shield,
+  Sparkles,
+  Zap,
 } from "lucide-react";
 
 const features = [
@@ -67,13 +71,6 @@ const highlights = [
   },
 ];
 
-const processSteps = [
-  "选题与需求确认：明确业务场景、角色、模块、技术栈。",
-  "生成项目代码：产出可用于学习和开发的完整项目脚手架与示例实现。",
-  "预览与讨论修改：基于结果继续问答，按导师要求逐轮完善。",
-  "论文与图表整理：按学校规范组织结构化内容，辅助你完成最终提交。",
-];
-
 const deliverables = [
   "可下载项目源码（按后端/前端/数据库分类预览）",
   "论文结构化稿件与图表参考材料",
@@ -96,11 +93,25 @@ const faqs = [
   },
   {
     q: "可以修改生成的内容吗？",
-    a: "当然可以。你可以通过 AI 对话持续调整需求，也可以在下载后自行修改代码和文稿内容。",
+    a: "当然可以。你可以通过 AI 对话持续调整需求，也可以在下载后自行修改代码和文档内容。",
   },
 ];
 
-export default function MarketingHome() {
+export default async function MarketingHome() {
+  const [session, platformConfig] = await Promise.all([
+    getServerSession(authOptions),
+    getPlatformConfig(),
+  ]);
+
+  const consolePath = session?.user?.role === "ADMIN" ? "/admin" : "/dashboard";
+  const supportContactTitle =
+    platformConfig.supportContactTitle || "一对一辅导（人工）";
+  const supportContactDescription =
+    platformConfig.supportContactDescription ||
+    "可联系客服获取选题把关、部署排错、答辩材料梳理等一对一支持。";
+  const supportContactQrUrl =
+    platformConfig.supportContactQrUrl || "/support-qr-placeholder.svg";
+
   return (
     <main className="flex flex-col">
       <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur">
@@ -109,14 +120,22 @@ export default function MarketingHome() {
             <Code2 className="h-6 w-6 text-primary" />
             <span>智码 ZhiMa</span>
           </Link>
-          <div className="flex gap-2">
-            <Button variant="ghost" asChild>
-              <Link href="/login">登录</Link>
-            </Button>
-            <Button asChild>
-              <Link href="/register">免费注册</Link>
-            </Button>
-          </div>
+          {session?.user ? (
+            <div className="flex gap-2">
+              <Button variant="outline" asChild>
+                <Link href={consolePath}>进入控制台</Link>
+              </Button>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <Button variant="ghost" asChild>
+                <Link href="/login">登录</Link>
+              </Button>
+              <Button asChild>
+                <Link href="/register">免费注册</Link>
+              </Button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -124,13 +143,13 @@ export default function MarketingHome() {
         <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-primary/5" />
         <div className="relative mx-auto max-w-6xl px-4 py-24 text-center lg:py-32">
           <div className="mb-6 inline-flex items-center gap-2 rounded-full border bg-background px-4 py-1.5 text-sm text-muted-foreground">
-            <Zap className="h-3.5 w-3.5 text-primary" />
-            毕设辅导与开发助手
+            <Sparkles className="h-3.5 w-3.5 text-primary" />
+            AI 毕设助手 · 辅导协作平台
           </div>
           <h1 className="text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
-            毕业设计有人带，推进更稳
+            让毕业设计从“能做”
             <br />
-            <span className="text-primary">你主导，AI 辅助</span>
+            <span className="text-primary">变成“做好”</span>
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-lg text-muted-foreground">
             智码聚焦毕业设计辅导场景，提供需求拆解、代码示例、论文结构和图表参考，
@@ -141,12 +160,21 @@ export default function MarketingHome() {
             不替代学生本人完成学业任务。
           </p>
           <div className="mt-8 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
-            <Button size="lg" asChild>
-              <Link href="/register">
-                免费开始
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
-            </Button>
+            {session?.user ? (
+              <Button size="lg" asChild>
+                <Link href={consolePath}>
+                  进入控制台
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Link>
+              </Button>
+            ) : (
+              <Button size="lg" asChild>
+                <Link href="/register">
+                  免费开始
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Link>
+              </Button>
+            )}
             <Button size="lg" variant="outline" asChild>
               <Link href="#features">了解更多</Link>
             </Button>
@@ -198,24 +226,49 @@ export default function MarketingHome() {
         </div>
       </section>
 
+      {platformConfig.homepageProcessEnabled ? (
+        <section className="border-t py-20">
+          <div className="mx-auto max-w-6xl px-4">
+            <div className="mb-10 text-center">
+              <h2 className="text-3xl font-bold">{platformConfig.homepageProcessTitle}</h2>
+              {platformConfig.homepageProcessDescription ? (
+                <p className="mt-3 text-muted-foreground">
+                  {platformConfig.homepageProcessDescription}
+                </p>
+              ) : null}
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              {platformConfig.homepageProcessSteps.map((step, index) => (
+                <Card key={`${step.title}-${index}`} className="border-0 shadow-sm">
+                  <CardContent className="flex gap-4 p-5">
+                    <div className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
+                      {index + 1}
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-base font-semibold">{step.title}</h3>
+                      <p className="mt-1 text-sm text-muted-foreground">{step.description}</p>
+                      {step.imageUrl ? (
+                        <img
+                          src={step.imageUrl}
+                          alt={`步骤 ${index + 1} 配图`}
+                          className="mt-3 max-h-48 w-full rounded-md border object-contain"
+                        />
+                      ) : (
+                        <div className="mt-3 flex h-32 w-full items-center justify-center rounded-md border border-dashed bg-muted/30 text-xs text-muted-foreground">
+                          后台可上传该步骤配图
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       <section className="border-t py-20">
         <div className="mx-auto grid max-w-6xl gap-8 px-4 lg:grid-cols-2">
-          <Card className="border-0 shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-2xl">使用流程清晰可控</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {processSteps.map((step, index) => (
-                <div key={step} className="flex items-start gap-3 rounded-lg bg-muted/40 px-3 py-2 text-sm">
-                  <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                    {index + 1}
-                  </span>
-                  <span>{step}</span>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
           <Card className="border-0 shadow-sm">
             <CardHeader>
               <CardTitle className="text-2xl">你将获得什么</CardTitle>
@@ -229,33 +282,31 @@ export default function MarketingHome() {
               ))}
             </CardContent>
           </Card>
-        </div>
-      </section>
 
-      <section className="border-t bg-muted/30 py-20">
-        <div className="mx-auto max-w-4xl px-4">
-          <Card className="border-0 shadow-sm">
-            <CardContent className="grid gap-6 p-6 md:grid-cols-[1fr_auto] md:items-center">
-              <div>
-                <div className="mb-2 inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground">
-                  <MessageSquareHeart className="h-3.5 w-3.5 text-primary" />
-                  一对一辅导
+          {platformConfig.supportContactEnabled ? (
+            <Card className="border-0 shadow-sm">
+              <CardContent className="grid gap-6 p-6 md:grid-cols-[1fr_auto] md:items-center">
+                <div>
+                  <div className="mb-2 inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground">
+                    <MessageSquareHeart className="h-3.5 w-3.5 text-primary" />
+                    一对一辅导
+                  </div>
+                  <h3 className="text-2xl font-semibold">{supportContactTitle}</h3>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {supportContactDescription}
+                  </p>
                 </div>
-                <h3 className="text-2xl font-semibold">遇到卡点可直接咨询</h3>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  提供选题把关、部署排错、项目结构优化、答辩材料梳理建议。二维码可在管理后台替换为你的正式客服渠道。
-                </p>
-              </div>
-              <div className="rounded-xl border bg-white p-3 shadow-sm">
-                <img
-                  src="/support-qr-placeholder.svg"
-                  alt="一对一辅导二维码占位图"
-                  className="h-40 w-40 rounded object-contain"
-                />
-                <p className="mt-2 text-center text-xs text-muted-foreground">扫码咨询（占位图）</p>
-              </div>
-            </CardContent>
-          </Card>
+                <div className="rounded-xl border bg-white p-3 shadow-sm">
+                  <img
+                    src={supportContactQrUrl}
+                    alt="一对一辅导二维码"
+                    className="h-40 w-40 rounded object-contain"
+                  />
+                  <p className="mt-2 text-center text-xs text-muted-foreground">扫码咨询</p>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
         </div>
       </section>
 

@@ -74,6 +74,7 @@ export async function PATCH(req: Request) {
     "requireRechargeForDownload",
     "maintenanceNoticeEnabled",
     "supportContactEnabled",
+    "homepageProcessEnabled",
   ] as const;
   for (const key of booleanKeys) {
     if (key in body) {
@@ -105,6 +106,35 @@ export async function PATCH(req: Request) {
   }
   if ("supportContactQrUrl" in body) {
     patch.supportContactQrUrl = String(body.supportContactQrUrl || "").trim();
+  }
+  if ("homepageProcessTitle" in body) {
+    patch.homepageProcessTitle = String(body.homepageProcessTitle || "").trim();
+  }
+  if ("homepageProcessDescription" in body) {
+    patch.homepageProcessDescription = String(
+      body.homepageProcessDescription || ""
+    ).trim();
+  }
+  if ("homepageProcessSteps" in body) {
+    if (!Array.isArray(body.homepageProcessSteps)) {
+      return error("homepageProcessSteps 必须为数组", 400);
+    }
+    const normalized = body.homepageProcessSteps
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const raw = item as Record<string, unknown>;
+        const title = String(raw.title || "").trim();
+        const description = String(raw.description || "").trim();
+        const imageUrl = String(raw.imageUrl || "").trim();
+        if (!title || !description) return null;
+        return { title, description, imageUrl };
+      })
+      .filter((item) => Boolean(item))
+      .slice(0, 8);
+    if (!normalized.length) {
+      return error("homepageProcessSteps 至少需要一个有效步骤", 400);
+    }
+    patch.homepageProcessSteps = normalized;
   }
 
   const beforeConfig = await getPlatformConfig();
