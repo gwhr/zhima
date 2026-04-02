@@ -311,7 +311,10 @@ export async function syncRuntimePreviewQueue() {
 }
 
 export async function hasUserRecharged(userId: string) {
-  return hasUserRechargedInternal(userId);
+  return hasUserRechargedInternal(userId).catch((err) => {
+    console.warn("hasUserRecharged failed in runtime-preview, fallback=false", err);
+    return false;
+  });
 }
 
 export async function countUserPreviewUsage(userId: string) {

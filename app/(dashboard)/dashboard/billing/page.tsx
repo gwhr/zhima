@@ -1,9 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { ExternalLink, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 type TokenSummary = {
   tokenBudget: number;
@@ -47,6 +55,15 @@ type LedgerItem = {
   createdAt: string;
 };
 
+type PaymentDialogState = {
+  orderId: string;
+  planName: string;
+  amountYuan: number;
+  points: number;
+  paymentUrl: string;
+  qrCodeUrl: string | null;
+};
+
 function toArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
@@ -62,6 +79,7 @@ export default function BillingPage() {
   const [ledger, setLedger] = useState<LedgerItem[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [payingPlanId, setPayingPlanId] = useState<string | null>(null);
+  const [paymentDialog, setPaymentDialog] = useState<PaymentDialogState | null>(null);
 
   async function loadData() {
     setLoading(true);
@@ -157,12 +175,25 @@ export default function BillingPage() {
       }
 
       const paymentUrl = String(result.data?.paymentUrl || "");
+      const qrCodeUrlRaw = result.data?.qrCodeUrl;
+      const qrCodeUrl =
+        typeof qrCodeUrlRaw === "string" && qrCodeUrlRaw.startsWith("http")
+          ? qrCodeUrlRaw
+          : null;
       if (!paymentUrl) {
         throw new Error("支付地址为空，请先检查支付配置");
       }
 
-      window.open(paymentUrl, "_blank", "noopener,noreferrer");
-      setMessage("支付窗口已打开，支付完成后刷新本页即可查看余额变更");
+      const selectedPlan = plans.find((item) => item.id === planId);
+      setPaymentDialog({
+        orderId: String(result.data?.orderId || ""),
+        planName: selectedPlan?.name ?? planId,
+        amountYuan: Number(result.data?.amountYuan ?? selectedPlan?.priceYuan ?? 0),
+        points: Number(result.data?.points ?? selectedPlan?.points ?? 0),
+        paymentUrl,
+        qrCodeUrl,
+      });
+      setMessage("请使用微信扫码完成支付，支付成功后返回本页刷新即可");
     } catch (paymentError) {
       setMessage(paymentError instanceof Error ? paymentError.message : "创建订单失败");
     } finally {
@@ -330,6 +361,63 @@ export default function BillingPage() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog
+        open={Boolean(paymentDialog)}
+        onOpenChange={(open) => {
+          if (!open) setPaymentDialog(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>微信扫码支付</DialogTitle>
+            <DialogDescription>
+              {paymentDialog
+                ? `${paymentDialog.planName} · ¥ ${paymentDialog.amountYuan.toFixed(2)} · ${paymentDialog.points.toLocaleString()} 点`
+                : "请使用微信扫一扫完成支付"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg border bg-muted/20 p-4">
+            {paymentDialog?.qrCodeUrl ? (
+              <img
+                src={paymentDialog.qrCodeUrl}
+                alt="支付二维码"
+                className="mx-auto h-56 w-56 rounded-md border bg-white p-2"
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                未拿到二维码链接，请点击下方按钮打开收银台页面完成支付。
+              </p>
+            )}
+            {paymentDialog?.orderId && (
+              <p className="mt-3 text-center text-xs text-muted-foreground">
+                订单号：{paymentDialog.orderId}
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                if (!paymentDialog?.paymentUrl) return;
+                window.open(paymentDialog.paymentUrl, "_blank", "noopener,noreferrer");
+              }}
+            >
+              <ExternalLink className="mr-2 h-4 w-4" />
+              打开收银台
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                void loadData();
+              }}
+            >
+              支付完成后刷新余额
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {message && <p className="text-sm text-muted-foreground">{message}</p>}
     </div>

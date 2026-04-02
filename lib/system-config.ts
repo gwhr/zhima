@@ -9,16 +9,21 @@ export interface HomepageProcessStep {
   imageUrl: string;
 }
 
-export const TOKEN_PLAN_IDS = ["BASIC", "STANDARD", "PREMIUM"] as const;
-export type TokenPlanId = (typeof TOKEN_PLAN_IDS)[number];
+const TOKEN_PLAN_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{1,63}$/;
 
 export interface TokenRechargePlanConfig {
-  id: TokenPlanId;
+  id: string;
   name: string;
   priceYuan: number;
   points: number;
   description: string;
   published: boolean;
+}
+
+export function normalizeTokenPlanId(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  const normalized = raw.trim().toLowerCase();
+  return TOKEN_PLAN_ID_PATTERN.test(normalized) ? normalized : "";
 }
 
 export interface PlatformConfig {
@@ -75,7 +80,7 @@ function parsePositiveNumber(value: string | undefined, fallback: number): numbe
 function defaultTokenRechargePlans(): TokenRechargePlanConfig[] {
   return [
     {
-      id: "BASIC",
+      id: "basic",
       name: "点数包·基础",
       priceYuan: 9.9,
       points: 12_000,
@@ -83,7 +88,7 @@ function defaultTokenRechargePlans(): TokenRechargePlanConfig[] {
       published: true,
     },
     {
-      id: "STANDARD",
+      id: "standard",
       name: "点数包·标准",
       priceYuan: 29.9,
       points: 42_000,
@@ -91,7 +96,7 @@ function defaultTokenRechargePlans(): TokenRechargePlanConfig[] {
       published: true,
     },
     {
-      id: "PREMIUM",
+      id: "premium",
       name: "点数包·高阶",
       priceYuan: 99.9,
       points: 160_000,
@@ -107,37 +112,49 @@ function normalizeTokenRechargePlans(
 ): TokenRechargePlanConfig[] {
   if (!Array.isArray(value)) return fallback;
 
-  const fallbackMap = new Map(fallback.map((item) => [item.id, item]));
-  const parsedMap = new Map<TokenPlanId, TokenRechargePlanConfig>();
+  const fallbackMap = new Map(
+    fallback
+      .map((item) => {
+        const normalizedId = normalizeTokenPlanId(item.id);
+        if (!normalizedId) return null;
+        return [normalizedId, { ...item, id: normalizedId }] as const;
+      })
+      .filter((item): item is readonly [string, TokenRechargePlanConfig] =>
+        Boolean(item)
+      )
+  );
+  const parsedPlans: TokenRechargePlanConfig[] = [];
+  const usedIds = new Set<string>();
 
   for (const rawItem of value) {
     if (!rawItem || typeof rawItem !== "object") continue;
     const item = rawItem as Record<string, unknown>;
-    const id = String(item.id ?? "").toUpperCase() as TokenPlanId;
-    if (!TOKEN_PLAN_IDS.includes(id)) continue;
+    const id = normalizeTokenPlanId(item.id);
+    if (!id || usedIds.has(id)) continue;
 
     const fallbackItem = fallbackMap.get(id);
-    if (!fallbackItem) continue;
 
-    const name = String(item.name ?? "").trim() || fallbackItem.name;
+    const name = String(item.name ?? "").trim() || fallbackItem?.name || "";
     const priceYuanRaw = Number(item.priceYuan);
     const pointsRaw = Number(item.points);
     const priceYuan =
       Number.isFinite(priceYuanRaw) && priceYuanRaw > 0
         ? Number(priceYuanRaw.toFixed(2))
-        : fallbackItem.priceYuan;
+        : fallbackItem?.priceYuan ?? 0;
     const points =
       Number.isFinite(pointsRaw) && pointsRaw > 0
         ? Math.floor(pointsRaw)
-        : fallbackItem.points;
+        : fallbackItem?.points ?? 0;
     const description =
-      String(item.description ?? "").trim() || fallbackItem.description;
+      String(item.description ?? "").trim() || fallbackItem?.description || "";
     const published =
       typeof item.published === "boolean"
         ? item.published
-        : fallbackItem.published;
+        : fallbackItem?.published ?? true;
 
-    parsedMap.set(id, {
+    if (!name || priceYuan <= 0 || points <= 0) continue;
+
+    parsedPlans.push({
       id,
       name,
       priceYuan,
@@ -145,11 +162,10 @@ function normalizeTokenRechargePlans(
       description,
       published,
     });
+    usedIds.add(id);
   }
 
-  return TOKEN_PLAN_IDS.map((id) => parsedMap.get(id) || fallbackMap.get(id)!).filter(
-    Boolean
-  );
+  return parsedPlans.length > 0 ? parsedPlans : fallback;
 }
 
 function defaultHomepageProcessSteps(): HomepageProcessStep[] {

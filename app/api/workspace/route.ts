@@ -3,6 +3,7 @@ import { success, error } from "@/lib/api-response";
 import { requireAuth } from "@/lib/auth-helpers";
 import { getPlatformConfig } from "@/lib/system-config";
 import { hasUserRecharged } from "@/lib/user-entitlements";
+import { Prisma } from "@prisma/client";
 
 type MajorCategory = "computer" | "non-computer";
 
@@ -43,7 +44,10 @@ export async function POST(req: Request) {
     if (!isAdmin) {
       const [platformConfig, recharged] = await Promise.all([
         getPlatformConfig().catch(() => null),
-        hasUserRecharged(userId),
+        hasUserRecharged(userId).catch((err) => {
+          console.warn("hasUserRecharged failed in workspace POST, fallback=false", err);
+          return false;
+        }),
       ]);
 
       if (!recharged) {
@@ -74,7 +78,14 @@ export async function POST(req: Request) {
     });
 
     return success(workspace, 201);
-  } catch {
+  } catch (err) {
+    console.error("Workspace create failed:", err);
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      (err.code === "P2021" || err.code === "P2022")
+    ) {
+      return error("数据库结构未同步，请先执行 npx prisma db push 后重试", 500);
+    }
     return error("创建失败", 500);
   }
 }
@@ -83,19 +94,30 @@ export async function GET() {
   const { session, error: authError } = await requireAuth();
   if (authError) return authError;
 
-  const workspaces = await db.workspace.findMany({
-    where: { userId: session!.user.id },
-    orderBy: { updatedAt: "desc" },
-    select: {
-      id: true,
-      name: true,
-      topic: true,
-      status: true,
-      techStack: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  });
+  try {
+    const workspaces = await db.workspace.findMany({
+      where: { userId: session!.user.id },
+      orderBy: { updatedAt: "desc" },
+      select: {
+        id: true,
+        name: true,
+        topic: true,
+        status: true,
+        techStack: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
 
-  return success(workspaces);
+    return success(workspaces);
+  } catch (err) {
+    console.error("Workspace list failed:", err);
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      (err.code === "P2021" || err.code === "P2022")
+    ) {
+      return error("数据库结构未同步，请先执行 npx prisma db push 后重试", 500);
+    }
+    return error("加载工作空间列表失败", 500);
+  }
 }

@@ -3,8 +3,8 @@ import { success, error } from "@/lib/api-response";
 import { requireAuth } from "@/lib/auth-helpers";
 import {
   getBillingPlanByType,
+  getLegacyOrderPlanType,
   normalizePlanType,
-  type PlanType,
 } from "@/lib/billing/plans";
 import { createPaymentSession } from "@/lib/payment/hupijiao";
 
@@ -13,8 +13,8 @@ export async function POST(req: Request) {
   if (authError) return authError;
 
   try {
-    const { planType, workspaceId } = await req.json();
-    const normalizedPlanType = normalizePlanType(planType);
+    const { planType, planId, workspaceId } = await req.json();
+    const normalizedPlanType = normalizePlanType(planId ?? planType);
     const appId = (process.env.HUPIJIAO_APPID || "").trim();
     const appSecret = (process.env.HUPIJIAO_SECRET || "").trim();
     const nextAuthUrl = (process.env.NEXTAUTH_URL || "").trim();
@@ -23,7 +23,7 @@ export async function POST(req: Request) {
       return error("无效点数包类型", 400);
     }
 
-    const plan = await getBillingPlanByType(normalizedPlanType as PlanType);
+    const plan = await getBillingPlanByType(normalizedPlanType);
     if (!plan) {
       return error("该充值套餐暂未发布，请稍后再试", 400);
     }
@@ -39,7 +39,10 @@ export async function POST(req: Request) {
       data: {
         userId: session!.user.id,
         workspaceId: workspaceId || null,
-        planType: normalizedPlanType as PlanType,
+        // Legacy enum column is kept for compatibility.
+        // Real dynamic plan id is encoded in paymentChannel.
+        planType: getLegacyOrderPlanType(normalizedPlanType),
+        paymentChannel: `hupijiao:${normalizedPlanType}`,
         amount: plan.price,
       },
     });

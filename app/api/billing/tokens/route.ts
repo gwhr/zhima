@@ -15,19 +15,21 @@ export async function GET() {
       e instanceof Prisma.PrismaClientKnownRequestError &&
       (e.code === "P2021" || e.code === "P2022")
     ) {
-      const fallbackBudget = getDefaultUserTokenBudget();
-      return success({
-        tokenBudget: fallbackBudget,
-        tokenUsed: 0,
-        tokenRemaining: fallbackBudget,
-        tokenFrozen: 0,
-        dailyUsedPoints: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheHitTokens: 0,
-      });
+      console.warn("Token tables not ready, fallback token summary is returned:", e.code);
+    } else {
+      console.error("Failed to load token summary, fallback token summary is returned:", e);
     }
-    console.error("Failed to load token summary:", e);
-    return error("Token summary unavailable", 500);
+
+    const fallbackBudget = getDefaultUserTokenBudget();
+    return success({
+      tokenBudget: fallbackBudget,
+      tokenUsed: 0,
+      tokenRemaining: fallbackBudget,
+      tokenFrozen: 0,
+      dailyUsedPoints: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheHitTokens: 0,
+    });
   }
 }

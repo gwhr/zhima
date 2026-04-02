@@ -1,7 +1,18 @@
 import { db } from "@/lib/db";
 import { verifyNotify } from "@/lib/payment/hupijiao";
-import { getBillingPlanByType, type PlanType } from "@/lib/billing/plans";
+import { getBillingPlanByType } from "@/lib/billing/plans";
 import { rechargeWallet } from "@/lib/billing/token-wallet";
+
+function parsePlanIdFromOrder(order: {
+  planType: string;
+  paymentChannel: string | null;
+}): string {
+  const channel = order.paymentChannel || "";
+  if (channel.startsWith("hupijiao:")) {
+    return channel.slice("hupijiao:".length);
+  }
+  return String(order.planType || "").toLowerCase();
+}
 
 export async function POST(req: Request) {
   const formData = await req.formData();
@@ -29,7 +40,8 @@ export async function POST(req: Request) {
     return new Response("fail", { status: 400 });
   }
 
-  const plan = await getBillingPlanByType(order.planType as PlanType, {
+  const planId = parsePlanIdFromOrder(order);
+  const plan = await getBillingPlanByType(planId, {
     includeUnpublished: true,
   });
   if (!plan) {
@@ -42,7 +54,7 @@ export async function POST(req: Request) {
       data: {
         status: "PAID",
         tradeNo,
-        paymentChannel: "hupijiao",
+        paymentChannel: `hupijiao:${plan.id}`,
         paidAt: new Date(),
       },
     });
@@ -55,8 +67,9 @@ export async function POST(req: Request) {
         description: `Recharge by order ${updatedOrder.id}`,
         metadata: {
           orderId: updatedOrder.id,
-          planType: updatedOrder.planType,
-          paymentChannel: "hupijiao",
+          planType: plan.id,
+          legacyPlanType: updatedOrder.planType,
+          paymentChannel: updatedOrder.paymentChannel,
           tradeNo,
         },
       },

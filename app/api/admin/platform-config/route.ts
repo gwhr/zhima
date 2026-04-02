@@ -1,43 +1,151 @@
 import { requireAdmin } from "@/lib/auth-helpers";
 import { success, error } from "@/lib/api-response";
-import {
-  TOKEN_PLAN_IDS,
-  getPlatformConfig,
-  savePlatformConfig,
-  type TokenPlanId,
-} from "@/lib/system-config";
+import { getPlatformConfig, savePlatformConfig, normalizeTokenPlanId } from "@/lib/system-config";
 import { listModelOptionIds } from "@/lib/model-catalog-config";
 import { logAdminAudit } from "@/lib/admin-audit";
+
+type HomepageStepPatch = {
+  title: string;
+  description: string;
+  imageUrl: string;
+};
+
+type TokenPlanPatch = {
+  id: string;
+  name: string;
+  priceYuan: number;
+  points: number;
+  description: string;
+  published: boolean;
+};
+
+function parsePositiveInteger(value: unknown, fieldName: string) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return { ok: false as const, message: `${fieldName} must be a positive integer` };
+  }
+  return { ok: true as const, value: Math.floor(parsed) };
+}
+
+function parseNonNegativeInteger(value: unknown, fieldName: string) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return { ok: false as const, message: `${fieldName} must be a non-negative integer` };
+  }
+  return { ok: true as const, value: Math.floor(parsed) };
+}
+
+function parsePositiveNumber(value: unknown, fieldName: string) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return { ok: false as const, message: `${fieldName} must be greater than 0` };
+  }
+  return { ok: true as const, value: parsed };
+}
+
+function parseHomepageSteps(value: unknown) {
+  if (!Array.isArray(value)) {
+    return { ok: false as const, message: "homepageProcessSteps must be an array" };
+  }
+
+  const normalized: HomepageStepPatch[] = value
+    .map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+      const raw = item as Record<string, unknown>;
+      const title = String(raw.title ?? "").trim();
+      const description = String(raw.description ?? "").trim();
+      const imageUrl = String(raw.imageUrl ?? "").trim();
+      if (!title || !description) return null;
+      return { title, description, imageUrl };
+    })
+    .filter((item): item is HomepageStepPatch => Boolean(item))
+    .slice(0, 8);
+
+  if (!normalized.length) {
+    return {
+      ok: false as const,
+      message: "homepageProcessSteps requires at least one valid step",
+    };
+  }
+
+  return { ok: true as const, value: normalized };
+}
+
+function parseTokenPlans(value: unknown) {
+  if (!Array.isArray(value)) {
+    return { ok: false as const, message: "tokenRechargePlans must be an array" };
+  }
+
+  const usedIds = new Set<string>();
+  const normalized: TokenPlanPatch[] = [];
+
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      return { ok: false as const, message: "tokenRechargePlans contains invalid item" };
+    }
+    const raw = item as Record<string, unknown>;
+
+    const id = normalizeTokenPlanId(raw.id);
+    if (!id) {
+      return {
+        ok: false as const,
+        message:
+          "Plan id is invalid. Use 2-64 chars with lowercase letters, numbers, underscore or hyphen.",
+      };
+    }
+    if (usedIds.has(id)) {
+      return { ok: false as const, message: `Duplicate plan id: ${id}` };
+    }
+    usedIds.add(id);
+
+    const name = String(raw.name ?? "").trim();
+    const description = String(raw.description ?? "").trim();
+    const published = typeof raw.published === "boolean" ? raw.published : Boolean(raw.published);
+    if (!name) {
+      return { ok: false as const, message: `Plan ${id} name is required` };
+    }
+
+    const parsedPrice = parsePositiveNumber(raw.priceYuan, `Plan ${id} price`);
+    if (!parsedPrice.ok) return parsedPrice;
+    const parsedPoints = parsePositiveInteger(raw.points, `Plan ${id} points`);
+    if (!parsedPoints.ok) return parsedPoints;
+
+    normalized.push({
+      id,
+      name,
+      description,
+      published,
+      priceYuan: Number(parsedPrice.value.toFixed(2)),
+      points: parsedPoints.value,
+    });
+  }
+
+  if (!normalized.length) {
+    return { ok: false as const, message: "At least one token plan is required" };
+  }
+  return { ok: true as const, value: normalized };
+}
 
 export async function GET() {
   const { error: authError } = await requireAdmin();
   if (authError) return authError;
 
-  const [config, modelIds] = await Promise.all([
-    getPlatformConfig(),
-    listModelOptionIds(),
-  ]);
-  return success({
-    config,
-    modelOptions: modelIds,
-  });
+  const [config, modelIds] = await Promise.all([getPlatformConfig(), listModelOptionIds()]);
+  return success({ config, modelOptions: modelIds });
 }
 
 export async function PATCH(req: Request) {
   const { session, error: authError } = await requireAdmin();
   if (authError) return authError;
 
-  const body = (await req.json().catch(() => null)) as
-    | Record<string, unknown>
-    | null;
-  if (!body) return error("请求参数无效", 400);
-
-  const modelIds = await listModelOptionIds();
+  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!body) return error("Invalid request body", 400);
 
   const patch: Record<string, unknown> = {};
-  const positiveNumberKeys = [
+  const modelIds = await listModelOptionIds();
+
+  const positiveIntegerFields = [
     "defaultUserTokenBudget",
-    "freeWorkspaceLimit",
     "codeGenTokenReserve",
     "thesisGenTokenReserve",
     "chatTokenReserve",
@@ -46,33 +154,33 @@ export async function PATCH(req: Request) {
     "defaultUserTaskConcurrencyLimit",
     "singleTaskTokenHardLimit",
   ] as const;
-  for (const key of positiveNumberKeys) {
-    if (key in body) {
-      const value = Number(body[key]);
-      if (!Number.isFinite(value) || value <= 0) {
-        return error(`${key} 必须为正数`, 400);
-      }
-      patch[key] = Math.floor(value);
-    }
+
+  for (const key of positiveIntegerFields) {
+    if (!(key in body)) continue;
+    const parsed = parsePositiveInteger(body[key], key);
+    if (!parsed.ok) return error(parsed.message, 400);
+    patch[key] = parsed.value;
+  }
+
+  if ("freeWorkspaceLimit" in body) {
+    const parsed = parseNonNegativeInteger(body.freeWorkspaceLimit, "freeWorkspaceLimit");
+    if (!parsed.ok) return error(parsed.message, 400);
+    patch.freeWorkspaceLimit = parsed.value;
   }
 
   if ("taskFailureRetryLimit" in body) {
-    const value = Number(body.taskFailureRetryLimit);
-    if (!Number.isFinite(value) || value < 0) {
-      return error("taskFailureRetryLimit 必须为非负数", 400);
-    }
-    patch.taskFailureRetryLimit = Math.floor(value);
+    const parsed = parseNonNegativeInteger(body.taskFailureRetryLimit, "taskFailureRetryLimit");
+    if (!parsed.ok) return error(parsed.message, 400);
+    patch.taskFailureRetryLimit = parsed.value;
   }
 
   if ("tokenBillingMultiplier" in body) {
-    const value = Number(body.tokenBillingMultiplier);
-    if (!Number.isFinite(value) || value <= 0) {
-      return error("tokenBillingMultiplier 必须为正数", 400);
-    }
-    patch.tokenBillingMultiplier = Number(value.toFixed(4));
+    const parsed = parsePositiveNumber(body.tokenBillingMultiplier, "tokenBillingMultiplier");
+    if (!parsed.ok) return error(parsed.message, 400);
+    patch.tokenBillingMultiplier = Number(parsed.value.toFixed(4));
   }
 
-  const booleanKeys = [
+  const booleanFields = [
     "enableCodeGeneration",
     "enableThesisGeneration",
     "enablePreviewBuild",
@@ -81,119 +189,50 @@ export async function PATCH(req: Request) {
     "supportContactEnabled",
     "homepageProcessEnabled",
   ] as const;
-  for (const key of booleanKeys) {
-    if (key in body) {
-      patch[key] = Boolean(body[key]);
-    }
+
+  for (const key of booleanFields) {
+    if (!(key in body)) continue;
+    patch[key] = Boolean(body[key]);
   }
 
-  const modelKeys = ["codeGenModelId", "thesisGenModelId"] as const;
-  for (const key of modelKeys) {
-    if (key in body) {
-      const value = String(body[key] || "");
-      if (!modelIds.includes(value)) {
-        return error(`${key} 不在可用模型列表中`, 400);
-      }
-      patch[key] = value;
+  const modelFields = ["codeGenModelId", "thesisGenModelId"] as const;
+  for (const key of modelFields) {
+    if (!(key in body)) continue;
+    const value = String(body[key] ?? "").trim();
+    if (!modelIds.includes(value)) {
+      return error(`${key} is not in available model options`, 400);
     }
+    patch[key] = value;
   }
 
-  if ("maintenanceNoticeText" in body) {
-    patch.maintenanceNoticeText = String(body.maintenanceNoticeText || "").trim();
+  const textFields = [
+    "maintenanceNoticeText",
+    "supportContactTitle",
+    "supportContactDescription",
+    "supportContactQrUrl",
+    "homepageProcessTitle",
+    "homepageProcessDescription",
+  ] as const;
+
+  for (const key of textFields) {
+    if (!(key in body)) continue;
+    patch[key] = String(body[key] ?? "").trim();
   }
-  if ("supportContactTitle" in body) {
-    patch.supportContactTitle = String(body.supportContactTitle || "").trim();
-  }
-  if ("supportContactDescription" in body) {
-    patch.supportContactDescription = String(
-      body.supportContactDescription || ""
-    ).trim();
-  }
-  if ("supportContactQrUrl" in body) {
-    patch.supportContactQrUrl = String(body.supportContactQrUrl || "").trim();
-  }
-  if ("homepageProcessTitle" in body) {
-    patch.homepageProcessTitle = String(body.homepageProcessTitle || "").trim();
-  }
-  if ("homepageProcessDescription" in body) {
-    patch.homepageProcessDescription = String(
-      body.homepageProcessDescription || ""
-    ).trim();
-  }
+
   if ("homepageProcessSteps" in body) {
-    if (!Array.isArray(body.homepageProcessSteps)) {
-      return error("homepageProcessSteps 必须为数组", 400);
-    }
-    const normalized = body.homepageProcessSteps
-      .map((item) => {
-        if (!item || typeof item !== "object") return null;
-        const raw = item as Record<string, unknown>;
-        const title = String(raw.title || "").trim();
-        const description = String(raw.description || "").trim();
-        const imageUrl = String(raw.imageUrl || "").trim();
-        if (!title || !description) return null;
-        return { title, description, imageUrl };
-      })
-      .filter((item) => Boolean(item))
-      .slice(0, 8);
-    if (!normalized.length) {
-      return error("homepageProcessSteps 至少需要一个有效步骤", 400);
-    }
-    patch.homepageProcessSteps = normalized;
+    const parsed = parseHomepageSteps(body.homepageProcessSteps);
+    if (!parsed.ok) return error(parsed.message, 400);
+    patch.homepageProcessSteps = parsed.value;
   }
+
   if ("tokenRechargePlans" in body) {
-    if (!Array.isArray(body.tokenRechargePlans)) {
-      return error("tokenRechargePlans 必须为数组", 400);
-    }
-
-    const current = await getPlatformConfig();
-    const currentMap = new Map(
-      current.tokenRechargePlans.map((plan) => [plan.id, plan])
-    );
-    const nextMap = new Map<TokenPlanId, (typeof current.tokenRechargePlans)[number]>();
-
-    for (const rawItem of body.tokenRechargePlans) {
-      if (!rawItem || typeof rawItem !== "object") continue;
-      const item = rawItem as Record<string, unknown>;
-      const id = String(item.id || "").toUpperCase() as TokenPlanId;
-      if (!TOKEN_PLAN_IDS.includes(id)) continue;
-
-      const previous = currentMap.get(id);
-      const name = String(item.name || "").trim();
-      const priceYuan = Number(item.priceYuan);
-      const points = Number(item.points);
-      const description = String(item.description || "").trim();
-      const published = Boolean(item.published);
-
-      if (!name) {
-        return error(`套餐 ${id} 名称不能为空`, 400);
-      }
-      if (!Number.isFinite(priceYuan) || priceYuan <= 0) {
-        return error(`套餐 ${id} 价格必须大于 0`, 400);
-      }
-      if (!Number.isFinite(points) || points <= 0) {
-        return error(`套餐 ${id} 点数必须大于 0`, 400);
-      }
-
-      nextMap.set(id, {
-        id,
-        name,
-        priceYuan: Number(priceYuan.toFixed(2)),
-        points: Math.floor(points),
-        description: description || previous?.description || "",
-        published,
-      });
-    }
-
-    patch.tokenRechargePlans = TOKEN_PLAN_IDS.map((id) => {
-      const nextItem = nextMap.get(id);
-      if (nextItem) return nextItem;
-      return currentMap.get(id)!;
-    });
+    const parsed = parseTokenPlans(body.tokenRechargePlans);
+    if (!parsed.ok) return error(parsed.message, 400);
+    patch.tokenRechargePlans = parsed.value;
   }
 
-  const beforeConfig = await getPlatformConfig();
-  const config = await savePlatformConfig(patch);
+  const before = await getPlatformConfig();
+  const next = await savePlatformConfig(patch);
 
   await logAdminAudit({
     adminUserId: session!.user.id,
@@ -201,14 +240,12 @@ export async function PATCH(req: Request) {
     module: "platform",
     targetType: "SystemConfig",
     targetId: "platform:settings",
-    summary: "更新平台配置",
-    before: beforeConfig,
-    after: config,
-    metadata: {
-      changedKeys: Object.keys(patch),
-    },
+    summary: "Update platform configuration",
+    before,
+    after: next,
+    metadata: { changedKeys: Object.keys(patch) },
     req,
   });
 
-  return success({ config });
+  return success({ config: next });
 }

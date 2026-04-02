@@ -29,7 +29,10 @@ export async function GET(
   if (!isAdmin) {
     const [platformConfig, recharged] = await Promise.all([
       getPlatformConfig().catch(() => null),
-      hasUserRecharged(session!.user.id),
+      hasUserRecharged(session!.user.id).catch((err) => {
+        console.warn("hasUserRecharged failed in workspace download GET, fallback=false", err);
+        return false;
+      }),
     ]);
     const requireRechargeForDownload =
       platformConfig?.requireRechargeForDownload ?? true;
