@@ -1,9 +1,15 @@
-import { db } from "@/lib/db";
-import { success, error } from "@/lib/api-response";
+import { error, success } from "@/lib/api-response";
 import { requireAuth } from "@/lib/auth-helpers";
+import { db } from "@/lib/db";
 import { deleteFile } from "@/lib/storage/oss";
 import { getPlatformConfig } from "@/lib/system-config";
 import { hasUserRecharged } from "@/lib/user-entitlements";
+
+function toSafeString(value: unknown, fallback = ""): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return fallback;
+}
 
 export async function GET(
   _req: Request,
@@ -13,7 +19,6 @@ export async function GET(
   if (authError) return authError;
 
   const { id } = await params;
-
   const workspace = await db.workspace.findUnique({
     where: { id },
     include: {
@@ -44,15 +49,14 @@ export async function GET(
     workspace,
     platformPolicy: {
       freeWorkspaceLimit: platformConfig?.freeWorkspaceLimit ?? 3,
-      requireRechargeForDownload:
-        platformConfig?.requireRechargeForDownload ?? true,
+      requireRechargeForDownload: platformConfig?.requireRechargeForDownload ?? true,
       supportContactEnabled: platformConfig?.supportContactEnabled ?? false,
-      supportContactTitle:
-        platformConfig?.supportContactTitle || "一对一辅导（人工）",
-      supportContactDescription:
-        platformConfig?.supportContactDescription ||
-        "可联系客服获取选题把关、部署排错、答辩材料梳理等一对一支持。",
-      supportContactQrUrl: platformConfig?.supportContactQrUrl || "",
+      supportContactTitle: toSafeString(platformConfig?.supportContactTitle, "一对一辅导（人工）"),
+      supportContactDescription: toSafeString(
+        platformConfig?.supportContactDescription,
+        "可联系导师获取选题把关、部署排错、答辩材料梳理等一对一支持。"
+      ),
+      supportContactQrUrl: toSafeString(platformConfig?.supportContactQrUrl),
       hasRecharged: recharged,
     },
   });
@@ -66,7 +70,6 @@ export async function DELETE(
   if (authError) return authError;
 
   const { id } = await params;
-
   const workspace = await db.workspace.findUnique({
     where: { id },
     select: {

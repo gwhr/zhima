@@ -113,6 +113,225 @@ interface TokenSummary {
   outputTokens: number;
 }
 
+const EMPTY_COUNTS: WorkspaceDetail["_count"] = {
+  chatMessages: 0,
+  files: 0,
+  taskJobs: 0,
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function toSafeString(value: unknown, fallback = ""): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return fallback;
+}
+
+function toSafeNumber(value: unknown, fallback = 0): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
+function toSafeBoolean(value: unknown, fallback = false): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    if (value === "true") return true;
+    if (value === "false") return false;
+  }
+  return fallback;
+}
+
+function toSafeDateString(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value instanceof Date) return value.toISOString();
+  return new Date().toISOString();
+}
+
+function normalizeWorkspaceDetail(raw: unknown): WorkspaceDetail | null {
+  if (!isRecord(raw)) return null;
+
+  const rawTechStack = isRecord(raw.techStack) ? raw.techStack : {};
+  const techStack: Record<string, string> = {};
+  for (const [key, value] of Object.entries(rawTechStack)) {
+    const safeValue = toSafeString(value).trim();
+    if (safeValue) {
+      techStack[key] = safeValue;
+    }
+  }
+
+  const rawRequirements = isRecord(raw.requirements) ? raw.requirements : {};
+  const roles: RequirementRole[] = Array.isArray(rawRequirements.roles)
+    ? rawRequirements.roles
+        .map((item) => {
+          if (!isRecord(item)) return null;
+          const name = toSafeString(item.name).trim();
+          const description = toSafeString(item.description).trim();
+          if (!name) return null;
+          return { name, description };
+        })
+        .filter((item): item is RequirementRole => !!item)
+    : [];
+
+  const modules: RequirementModule[] = Array.isArray(rawRequirements.modules)
+    ? rawRequirements.modules
+        .map((item) => {
+          if (!isRecord(item)) return null;
+          const name = toSafeString(item.name).trim();
+          if (!name) return null;
+          const features = Array.isArray(item.features)
+            ? item.features
+                .map((feature) => toSafeString(feature).trim())
+                .filter(Boolean)
+            : [];
+          return {
+            name,
+            features,
+            enabled: toSafeBoolean(item.enabled, true),
+          };
+        })
+        .filter((item): item is RequirementModule => !!item)
+    : [];
+
+  const tables = Array.isArray(rawRequirements.tables)
+    ? rawRequirements.tables
+        .map((table) => toSafeString(table).trim())
+        .filter(Boolean)
+    : [];
+
+  const rawAssessment = isRecord(rawRequirements.difficultyAssessment)
+    ? rawRequirements.difficultyAssessment
+    : null;
+  const difficultyAssessment: DifficultyAssessment | undefined = rawAssessment
+    ? {
+        academic: toSafeNumber(rawAssessment.academic),
+        practical: toSafeNumber(rawAssessment.practical),
+        difficulty: toSafeNumber(rawAssessment.difficulty),
+        workload: toSafeString(rawAssessment.workload),
+        innovation: toSafeNumber(rawAssessment.innovation),
+        overall: toSafeNumber(rawAssessment.overall),
+        suggestions: Array.isArray(rawAssessment.suggestions)
+          ? rawAssessment.suggestions
+              .map((item) => toSafeString(item).trim())
+              .filter(Boolean)
+          : [],
+      }
+    : undefined;
+
+  const requirements: Requirements = {
+    summary: toSafeString(rawRequirements.summary),
+    roles,
+    modules,
+    tables,
+    majorCategory:
+      rawRequirements.majorCategory === "non-computer" ? "non-computer" : "computer",
+    majorCategoryLabel: toSafeString(rawRequirements.majorCategoryLabel),
+    difficulty: toSafeNumber(rawRequirements.difficulty),
+    feasibility: toSafeString(rawRequirements.feasibility),
+    estimatedPages: toSafeNumber(rawRequirements.estimatedPages),
+    estimatedApis: toSafeNumber(rawRequirements.estimatedApis),
+    estimatedTables: toSafeNumber(rawRequirements.estimatedTables),
+    estimatedWords: toSafeNumber(rawRequirements.estimatedWords),
+    difficultyAssessment,
+    featureConfirmed: toSafeBoolean(rawRequirements.featureConfirmed),
+    featureConfirmedAt: toSafeString(rawRequirements.featureConfirmedAt),
+    featureConfirmAction:
+      rawRequirements.featureConfirmAction === "revise" ? "revise" : "confirm",
+    featureConfirmInput: toSafeString(rawRequirements.featureConfirmInput),
+    previewConfirmed: toSafeBoolean(rawRequirements.previewConfirmed),
+    previewConfirmedAt: toSafeString(rawRequirements.previewConfirmedAt),
+  };
+
+  const rawCount = isRecord(raw._count) ? raw._count : {};
+  const count = {
+    chatMessages: toSafeNumber(rawCount.chatMessages),
+    files: toSafeNumber(rawCount.files),
+    taskJobs: toSafeNumber(rawCount.taskJobs),
+  };
+
+  const id = toSafeString(raw.id).trim();
+  if (!id) return null;
+
+  return {
+    id,
+    name: toSafeString(raw.name).trim() || "未命名项目",
+    topic: toSafeString(raw.topic).trim(),
+    techStack,
+    requirements,
+    status: toSafeString(raw.status).trim() || "DRAFT",
+    createdAt: toSafeDateString(raw.createdAt),
+    _count: count,
+  };
+}
+
+function normalizeWorkspacePlatformPolicy(raw: unknown): WorkspacePlatformPolicy | null {
+  if (!isRecord(raw)) return null;
+
+  return {
+    freeWorkspaceLimit: toSafeNumber(raw.freeWorkspaceLimit, 3),
+    requireRechargeForDownload: toSafeBoolean(raw.requireRechargeForDownload, true),
+    supportContactEnabled: toSafeBoolean(raw.supportContactEnabled, false),
+    supportContactTitle: toSafeString(raw.supportContactTitle),
+    supportContactDescription: toSafeString(raw.supportContactDescription),
+    supportContactQrUrl: toSafeString(raw.supportContactQrUrl),
+    hasRecharged: toSafeBoolean(raw.hasRecharged, false),
+  };
+}
+
+function normalizeFileItems(raw: unknown): FileItem[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      if (!isRecord(item)) return null;
+      const id = toSafeString(item.id).trim();
+      if (!id) return null;
+      const path = toSafeString(item.path).trim();
+      return {
+        id,
+        path,
+        type: toSafeString(item.type, "CODE"),
+        size: Math.max(0, toSafeNumber(item.size)),
+      };
+    })
+    .filter((item): item is FileItem => !!item && !!item.path);
+}
+
+function normalizeJobs(raw: unknown): Job[] {
+  if (!Array.isArray(raw)) return [];
+  const jobs: Job[] = [];
+  for (const item of raw) {
+    if (!isRecord(item)) continue;
+    const id = toSafeString(item.id).trim();
+    if (!id) continue;
+    jobs.push({
+      id,
+      type: toSafeString(item.type, "CODE_GEN"),
+      status: toSafeString(item.status, "PENDING"),
+      progress: Math.min(100, Math.max(0, toSafeNumber(item.progress))),
+      result: isRecord(item.result) ? item.result : null,
+      error: toSafeString(item.error) || null,
+      createdAt: toSafeDateString(item.createdAt),
+    });
+  }
+  return jobs;
+}
+
+function normalizeTokenSummary(raw: unknown): TokenSummary | null {
+  if (!isRecord(raw)) return null;
+  return {
+    tokenBudget: Math.max(0, toSafeNumber(raw.tokenBudget)),
+    tokenUsed: Math.max(0, toSafeNumber(raw.tokenUsed)),
+    tokenRemaining: Math.max(0, toSafeNumber(raw.tokenRemaining)),
+    inputTokens: Math.max(0, toSafeNumber(raw.inputTokens)),
+    outputTokens: Math.max(0, toSafeNumber(raw.outputTokens)),
+  };
+}
+
 const statusMap: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
   DRAFT: { label: "草稿", variant: "secondary" },
   GENERATING: { label: "生成中", variant: "default" },
@@ -224,19 +443,34 @@ export default function WorkspaceDetailPage() {
 
       if (wsData?.success) {
         const payload = wsData.data ?? {};
+        const rawWorkspace = payload.workspace ? payload.workspace : payload;
+        const normalizedWorkspace = normalizeWorkspaceDetail(rawWorkspace);
         if (payload.workspace) {
-          setWorkspace(payload.workspace as WorkspaceDetail);
-          setPlatformPolicy(
-            (payload.platformPolicy as WorkspacePlatformPolicy) || null
-          );
+          setWorkspace(normalizedWorkspace);
+          setPlatformPolicy(normalizeWorkspacePlatformPolicy(payload.platformPolicy));
         } else {
-          setWorkspace(payload as WorkspaceDetail);
+          setWorkspace(normalizedWorkspace);
           setPlatformPolicy(null);
         }
+      } else if (!silent) {
+        setWorkspace(null);
+        setPlatformPolicy(null);
       }
-      if (filesData?.success) setFiles(filesData.data);
-      if (jobsData?.success) setJobs(jobsData.data);
-      if (tokenData?.success) setTokenSummary(tokenData.data);
+      if (filesData?.success) {
+        setFiles(normalizeFileItems(filesData.data));
+      } else if (!silent) {
+        setFiles([]);
+      }
+      if (jobsData?.success) {
+        setJobs(normalizeJobs(jobsData.data));
+      } else if (!silent) {
+        setJobs([]);
+      }
+      if (tokenData?.success) {
+        setTokenSummary(normalizeTokenSummary(tokenData.data));
+      } else if (!silent) {
+        setTokenSummary(null);
+      }
     } catch (err) {
       console.error("Failed to load workspace detail:", err);
     } finally {
@@ -471,8 +705,8 @@ export default function WorkspaceDetailPage() {
     (platformPolicy?.supportContactTitle ||
       platformPolicy?.supportContactDescription ||
       platformPolicy?.supportContactQrUrl);
-  const supportContactQrUrl =
-    platformPolicy?.supportContactQrUrl?.trim() || "/support-qr-placeholder.svg";
+  const supportContactQrUrl = toSafeString(platformPolicy?.supportContactQrUrl).trim()
+    || "/support-qr-placeholder.svg";
   const downloadNeedRecharge =
     (platformPolicy?.requireRechargeForDownload ?? false) &&
     !(platformPolicy?.hasRecharged ?? false);

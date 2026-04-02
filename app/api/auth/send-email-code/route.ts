@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { sendVerificationCode } from "@/lib/sms/provider";
+import { sendEmailVerificationCode } from "@/lib/email/provider";
 
 function getClientIp(req: Request): string | null {
   const xForwardedFor = req.headers.get("x-forwarded-for");
@@ -19,17 +19,17 @@ function getClientIp(req: Request): string | null {
 
 export async function POST(req: Request) {
   try {
-    const { phone } = await req.json();
-    const normalizedPhone = typeof phone === "string" ? phone.trim() : "";
+    const { email } = await req.json();
+    const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
 
-    if (!normalizedPhone || !/^1[3-9]\d{9}$/.test(normalizedPhone)) {
+    if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       return NextResponse.json(
-        { success: false, error: "请输入正确的手机号" },
+        { success: false, error: "请输入正确的邮箱地址" },
         { status: 400 }
       );
     }
 
-    const result = await sendVerificationCode(normalizedPhone, {
+    const result = await sendEmailVerificationCode(normalizedEmail, {
       ip: getClientIp(req),
     });
 
@@ -40,7 +40,6 @@ export async function POST(req: Request) {
           : result.errorCode === "PROVIDER_ERROR"
             ? 502
             : 400;
-
       return NextResponse.json({ success: false, error: result.message }, { status });
     }
 

@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useSession, signOut } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
+import { Code2, Home, LayoutDashboard, LogOut, User } from "lucide-react";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -12,19 +14,19 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { NotificationBell } from "@/components/notification-bell";
-import { Code2, LogOut, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { href: "/dashboard", label: "仪表盘" },
-  { href: "/workspace", label: "工作空间" },
+  { href: "/", label: "首页", icon: Home },
+  { href: "/dashboard", label: "仪表盘", icon: LayoutDashboard },
+  { href: "/workspace", label: "工作空间", icon: Code2 },
 ];
 
 export function Navbar() {
   const pathname = usePathname();
   const { data: session } = useSession();
+
   const initials = (session?.user?.name || session?.user?.email || "U")
     .slice(0, 2)
     .toUpperCase();
@@ -32,10 +34,7 @@ export function Navbar() {
   return (
     <header className="sticky top-0 z-40 border-b border-white/70 bg-white/80 shadow-[0_8px_30px_-24px_rgba(15,23,42,0.5)] backdrop-blur-xl supports-[backdrop-filter]:bg-white/65">
       <div className="flex h-16 items-center gap-3 px-4 lg:px-6">
-        <Link
-          href="/dashboard"
-          className="group flex items-center gap-2.5 rounded-xl px-1 py-1"
-        >
+        <Link href="/" className="group flex items-center gap-2.5 rounded-xl px-1 py-1">
           <span className="flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500 to-teal-500 text-white shadow-md shadow-cyan-500/25 transition-transform group-hover:scale-105">
             <Code2 className="h-5 w-5" />
           </span>
@@ -45,19 +44,22 @@ export function Navbar() {
         <nav className="ml-2 hidden items-center gap-2 md:flex">
           {navItems.map((item) => {
             const active =
-              pathname === item.href ||
-              (item.href !== "/dashboard" && pathname.startsWith(item.href));
+              item.href === "/"
+                ? pathname === "/"
+                : pathname === item.href || pathname.startsWith(`${item.href}/`);
+            const Icon = item.icon;
             return (
               <Link
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  "rounded-full px-3 py-1.5 text-sm transition-colors",
+                  "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition-colors",
                   active
                     ? "bg-primary/12 text-primary"
-                    : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                    : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
                 )}
               >
+                <Icon className="h-3.5 w-3.5" />
                 {item.label}
               </Link>
             );
@@ -75,7 +77,7 @@ export function Navbar() {
                     className="relative h-9 w-9 rounded-full border border-transparent bg-white/70 hover:border-border/70 hover:bg-white"
                   >
                     <Avatar className="h-9 w-9">
-                      <AvatarFallback className="bg-primary text-primary-foreground text-xs">
+                      <AvatarFallback className="bg-primary text-xs text-primary-foreground">
                         {initials}
                       </AvatarFallback>
                     </Avatar>
@@ -89,6 +91,12 @@ export function Navbar() {
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Link href="/" className="cursor-pointer">
+                      <Home className="mr-2 h-4 w-4" />
+                      返回首页
+                    </Link>
+                  </DropdownMenuItem>
                   <DropdownMenuItem asChild>
                     <Link href="/dashboard/profile" className="cursor-pointer">
                       <User className="mr-2 h-4 w-4" />

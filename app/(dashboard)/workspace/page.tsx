@@ -2,18 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Plus, Sparkles, Trash2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, Sparkles } from "lucide-react";
 import { CreateWorkspaceDialog } from "@/components/create-workspace-dialog";
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 
 interface Workspace {
@@ -22,6 +22,24 @@ interface Workspace {
   topic: string;
   status: string;
   createdAt: string;
+}
+
+function normalizeWorkspace(raw: unknown): Workspace | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  const id = typeof record.id === "string" ? record.id : "";
+  if (!id) return null;
+
+  return {
+    id,
+    name: typeof record.name === "string" && record.name.trim() ? record.name : "未命名项目",
+    topic: typeof record.topic === "string" ? record.topic : "",
+    status: typeof record.status === "string" ? record.status : "DRAFT",
+    createdAt:
+      typeof record.createdAt === "string"
+        ? record.createdAt
+        : new Date().toISOString(),
+  };
 }
 
 const statusMap: Record<
@@ -43,30 +61,47 @@ export default function WorkspaceListPage() {
   const [deleting, setDeleting] = useState(false);
 
   async function fetchWorkspaces() {
-    const res = await fetch("/api/workspace");
-    const data = await res.json();
-    if (data.success) setWorkspaces(data.data);
-    setLoading(false);
+    setLoading(true);
+    try {
+      const response = await fetch("/api/workspace");
+      const data = await response.json();
+      if (data?.success) {
+        const next = Array.isArray(data.data)
+          ? data.data
+              .map((item: unknown) => normalizeWorkspace(item))
+              .filter((item: Workspace | null): item is Workspace => !!item)
+          : [];
+        setWorkspaces(next);
+      } else {
+        setWorkspaces([]);
+      }
+    } catch (err) {
+      console.error("Failed to load workspace list:", err);
+      setWorkspaces([]);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
-    fetchWorkspaces();
+    void fetchWorkspaces();
   }, []);
 
   async function handleDelete() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      const res = await fetch(`/api/workspace/${deleteTarget.id}`, { method: "DELETE" });
-      const data = await res.json();
+      const response = await fetch(`/api/workspace/${deleteTarget.id}`, { method: "DELETE" });
+      const data = await response.json();
       if (data.success) {
-        setWorkspaces((prev) => prev.filter((w) => w.id !== deleteTarget.id));
+        setWorkspaces((prev) => prev.filter((item) => item.id !== deleteTarget.id));
       }
     } catch {
       // ignore
+    } finally {
+      setDeleting(false);
+      setDeleteTarget(null);
     }
-    setDeleting(false);
-    setDeleteTarget(null);
   }
 
   return (
@@ -75,12 +110,8 @@ export default function WorkspaceListPage() {
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_92%_0%,rgba(14,165,164,0.18),transparent_44%),radial-gradient(circle_at_6%_92%,rgba(249,115,22,0.14),transparent_36%)]" />
         <div className="relative flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">
-              Workspace Hub
-            </p>
-            <h1 className="mt-2 text-2xl font-semibold tracking-tight md:text-3xl">
-              我的工作空间
-            </h1>
+            <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Workspace Hub</p>
+            <h1 className="mt-2 text-2xl font-semibold tracking-tight md:text-3xl">我的工作空间</h1>
             <p className="mt-2 text-sm text-muted-foreground md:text-base">
               在这里管理你的项目链路，从需求确认到生成下载一步到位。
             </p>
@@ -115,18 +146,18 @@ export default function WorkspaceListPage() {
         </Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {workspaces.map((ws) => {
-            const status = statusMap[ws.status] || statusMap.DRAFT;
+          {workspaces.map((workspace) => {
+            const status = statusMap[workspace.status] || statusMap.DRAFT;
             return (
               <Card
-                key={ws.id}
+                key={workspace.id}
                 className="group relative cursor-pointer border-white/70 bg-white/85 transition-all duration-200 hover:-translate-y-1 hover:shadow-[0_24px_45px_-30px_rgba(15,23,42,0.55)]"
-                onClick={() => router.push(`/workspace/${ws.id}`)}
+                onClick={() => router.push(`/workspace/${workspace.id}`)}
               >
                 <CardHeader className="pb-2">
                   <div className="flex items-start justify-between gap-3">
                     <CardTitle className="line-clamp-2 pr-2 text-lg leading-snug">
-                      {ws.name}
+                      {workspace.name}
                     </CardTitle>
                     <Badge variant={status.variant} className="shrink-0">
                       {status.label}
@@ -134,18 +165,18 @@ export default function WorkspaceListPage() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <p className="line-clamp-3 text-sm text-muted-foreground">{ws.topic}</p>
+                  <p className="line-clamp-3 text-sm text-muted-foreground">{workspace.topic}</p>
                   <div className="mt-4 flex items-center justify-between">
                     <p className="text-xs text-muted-foreground">
-                      {new Date(ws.createdAt).toLocaleDateString("zh-CN")}
+                      {new Date(workspace.createdAt).toLocaleDateString("zh-CN")}
                     </p>
                     <Button
                       variant="ghost"
                       size="icon-sm"
                       className="text-muted-foreground opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteTarget(ws);
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setDeleteTarget(workspace);
                       }}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -158,18 +189,14 @@ export default function WorkspaceListPage() {
         </div>
       )}
 
-      <CreateWorkspaceDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        onCreated={fetchWorkspaces}
-      />
+      <CreateWorkspaceDialog open={dialogOpen} onOpenChange={setDialogOpen} onCreated={fetchWorkspaces} />
 
-      <Dialog open={!!deleteTarget} onOpenChange={(v) => !v && setDeleteTarget(null)}>
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>确认删除</DialogTitle>
             <DialogDescription>
-              确定要删除工作空间「{deleteTarget?.name}」吗？删除后项目相关数据将无法恢复。
+              确定要删除工作空间“{deleteTarget?.name}”吗？删除后项目相关数据将无法恢复。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">

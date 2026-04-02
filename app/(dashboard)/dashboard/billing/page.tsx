@@ -47,6 +47,10 @@ type LedgerItem = {
   createdAt: string;
 };
 
+function toArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
 function formatDelta(value: number) {
   return `${value >= 0 ? "+" : ""}${value.toLocaleString()}`;
 }
@@ -62,20 +66,66 @@ export default function BillingPage() {
   async function loadData() {
     setLoading(true);
     setMessage(null);
+
+    const parseJsonSafe = async (response: Response) => {
+      try {
+        return await response.json();
+      } catch {
+        return null;
+      }
+    };
+
     try {
-      const [tokenRes, plansRes, ledgerRes] = await Promise.all([
+      const [tokenResResult, plansResResult, ledgerResResult] = await Promise.allSettled([
         fetch("/api/billing/tokens"),
         fetch("/api/billing/plans"),
         fetch("/api/billing/ledger?limit=50"),
       ]);
 
-      const tokenData = await tokenRes.json();
-      const plansData = await plansRes.json();
-      const ledgerData = await ledgerRes.json();
+      const failedSections: string[] = [];
 
-      if (tokenData.success) setTokenSummary(tokenData.data);
-      if (plansData.success) setPlans(plansData.data || []);
-      if (ledgerData.success) setLedger(ledgerData.data || []);
+      if (tokenResResult.status === "fulfilled") {
+        const tokenData = await parseJsonSafe(tokenResResult.value);
+        if (tokenResResult.value.ok && tokenData?.success) {
+          setTokenSummary((tokenData.data as TokenSummary) ?? null);
+        } else {
+          setTokenSummary(null);
+          failedSections.push("余额");
+        }
+      } else {
+        setTokenSummary(null);
+        failedSections.push("余额");
+      }
+
+      if (plansResResult.status === "fulfilled") {
+        const plansData = await parseJsonSafe(plansResResult.value);
+        if (plansResResult.value.ok && plansData?.success) {
+          setPlans(toArray<PlanItem>(plansData.data));
+        } else {
+          setPlans([]);
+          failedSections.push("充值包");
+        }
+      } else {
+        setPlans([]);
+        failedSections.push("充值包");
+      }
+
+      if (ledgerResResult.status === "fulfilled") {
+        const ledgerData = await parseJsonSafe(ledgerResResult.value);
+        if (ledgerResResult.value.ok && ledgerData?.success) {
+          setLedger(toArray<LedgerItem>(ledgerData.data));
+        } else {
+          setLedger([]);
+          failedSections.push("账单流水");
+        }
+      } else {
+        setLedger([]);
+        failedSections.push("账单流水");
+      }
+
+      if (failedSections.length > 0) {
+        setMessage(`部分数据加载失败（${failedSections.join("、")}），请稍后刷新重试`);
+      }
     } catch {
       setMessage("加载账单数据失败，请稍后重试");
     } finally {
@@ -89,10 +139,7 @@ export default function BillingPage() {
 
   const usageRatio = useMemo(() => {
     if (!tokenSummary || tokenSummary.tokenBudget <= 0) return 0;
-    return Math.min(
-      100,
-      Math.round((tokenSummary.tokenUsed / tokenSummary.tokenBudget) * 100)
-    );
+    return Math.min(100, Math.round((tokenSummary.tokenUsed / tokenSummary.tokenBudget) * 100));
   }, [tokenSummary]);
 
   async function createPayment(planId: string) {
@@ -104,16 +151,18 @@ export default function BillingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ planType: planId }),
       });
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error(result.error || "创建订单失败");
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || "创建订单失败");
       }
+
       const paymentUrl = String(result.data?.paymentUrl || "");
       if (!paymentUrl) {
-        throw new Error("支付地址为空，请检查支付配置");
+        throw new Error("支付地址为空，请先检查支付配置");
       }
+
       window.open(paymentUrl, "_blank", "noopener,noreferrer");
-      setMessage("支付窗口已打开，支付完成后可刷新本页查看余额变更");
+      setMessage("支付窗口已打开，支付完成后刷新本页即可查看余额变更");
     } catch (paymentError) {
       setMessage(paymentError instanceof Error ? paymentError.message : "创建订单失败");
     } finally {
@@ -166,19 +215,18 @@ export default function BillingPage() {
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">今日已扣</p>
-                <p className="text-xl font-semibold">{tokenSummary.dailyUsedPoints.toLocaleString()}</p>
+                <p className="text-xl font-semibold">
+                  {tokenSummary.dailyUsedPoints.toLocaleString()}
+                </p>
               </div>
             </div>
 
             <div className="space-y-1">
               <div className="h-2 w-full overflow-hidden rounded bg-muted">
-                <div
-                  className="h-full bg-primary transition-all"
-                  style={{ width: `${usageRatio}%` }}
-                />
+                <div className="h-full bg-primary transition-all" style={{ width: `${usageRatio}%` }} />
               </div>
               <p className="text-xs text-muted-foreground">
-                用量进度：{usageRatio}% · Token（输入/输出/缓存）：
+                使用进度：{usageRatio}% · Token（输入/输出/缓存）：
                 {` ${tokenSummary.inputTokens.toLocaleString()} / ${tokenSummary.outputTokens.toLocaleString()} / ${tokenSummary.cacheHitTokens.toLocaleString()}`}
               </p>
             </div>
@@ -196,9 +244,7 @@ export default function BillingPage() {
               <p className="text-sm text-muted-foreground">{plan.id}</p>
               <h3 className="mt-1 text-lg font-semibold">{plan.name}</h3>
               <p className="mt-2 text-2xl font-bold">¥ {plan.priceYuan.toFixed(2)}</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {plan.points.toLocaleString()} 点
-              </p>
+              <p className="mt-1 text-sm text-muted-foreground">{plan.points.toLocaleString()} 点</p>
               <p className="mt-2 text-xs text-muted-foreground">{plan.description}</p>
               <Button
                 className="mt-4 w-full"
@@ -233,7 +279,7 @@ export default function BillingPage() {
                   <th className="px-2 py-3 text-left font-medium">任务/模型</th>
                   <th className="px-2 py-3 text-left font-medium">Token（入/出/缓存）</th>
                   <th className="px-2 py-3 text-left font-medium">点数变动</th>
-                  <th className="px-2 py-3 text-left font-medium">余额后状态</th>
+                  <th className="px-2 py-3 text-left font-medium">变动后状态</th>
                 </tr>
               </thead>
               <tbody>
@@ -245,16 +291,13 @@ export default function BillingPage() {
                     <td className="px-2 py-3">{item.type}</td>
                     <td className="px-2 py-3">
                       <p>{item.taskType || "-"}</p>
-                      <p className="font-mono text-xs text-muted-foreground">
-                        {item.model || "-"}
-                      </p>
+                      <p className="font-mono text-xs text-muted-foreground">{item.model || "-"}</p>
                       {item.description && (
                         <p className="text-xs text-muted-foreground">{item.description}</p>
                       )}
                     </td>
                     <td className="px-2 py-3 tabular-nums">
-                      {item.inputTokens.toLocaleString()} /{" "}
-                      {item.outputTokens.toLocaleString()} /{" "}
+                      {item.inputTokens.toLocaleString()} / {item.outputTokens.toLocaleString()} /{" "}
                       {item.cacheHitTokens.toLocaleString()}
                       <p className="text-xs text-muted-foreground">
                         ¥ {Number(item.costYuan || 0).toFixed(6)}

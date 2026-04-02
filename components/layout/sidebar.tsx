@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
   FolderOpen,
+  Home,
   LayoutDashboard,
   MessageSquare,
   Plus,
@@ -24,6 +25,7 @@ interface Workspace {
 }
 
 const navItems = [
+  { href: "/", icon: Home, label: "首页" },
   { href: "/dashboard", icon: LayoutDashboard, label: "仪表盘" },
   { href: "/workspace", icon: FolderOpen, label: "工作空间" },
   { href: "/dashboard/billing", icon: WalletCards, label: "Token 余额" },
@@ -41,11 +43,13 @@ export function Sidebar() {
     fetch("/api/workspace")
       .then((res) => res.json())
       .then((data) => {
-        if (data.success) {
+        if (data?.success) {
           setWorkspaces((data.data || []).slice(0, 10));
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        setWorkspaces([]);
+      });
   }, []);
 
   const isAdmin = (session?.user as { role?: string })?.role === "ADMIN";
@@ -62,7 +66,10 @@ export function Sidebar() {
 
         <nav className="space-y-1.5">
           {navItems.map((item) => {
-            const active = pathname === item.href;
+            const active =
+              item.href === "/"
+                ? pathname === "/"
+                : pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (
               <Link
                 key={item.href}
@@ -88,6 +95,7 @@ export function Sidebar() {
               </Link>
             );
           })}
+
           {isAdmin && (
             <Link
               href="/admin"

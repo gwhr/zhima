@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { FolderOpen, MessageSquare, FileText, Zap, ArrowRight } from "lucide-react";
+import { FolderOpen, MessageSquare, FileText, Zap, ArrowRight, Home } from "lucide-react";
 
 export default async function DashboardPage() {
   const session = await getSession();
@@ -76,6 +76,12 @@ export default async function DashboardPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button variant="outline" asChild>
+              <Link href="/">
+                <Home className="h-4 w-4" />
+                返回首页
+              </Link>
+            </Button>
             <Button asChild>
               <Link href="/workspace">
                 新建工作空间
