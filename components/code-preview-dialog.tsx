@@ -19,6 +19,7 @@ import {
   Check,
   FolderOpen,
   Play,
+  Download,
   MonitorSmartphone,
   RefreshCw,
   Info,
@@ -27,6 +28,11 @@ import {
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  filterCodeFilesByScope,
+  type SourceScope,
+  isCoreCodeFilePath,
+} from "@/lib/file-preview-scope";
 
 interface FileItem {
   id: string;
@@ -133,10 +139,16 @@ export function CodePreviewDialog({
   files,
 }: CodePreviewDialogProps) {
   const [activeTab, setActiveTab] = useState<"files" | "preview">("preview");
+  const [fileScope, setFileScope] = useState<SourceScope>("core");
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string>("");
   const [loadingContent, setLoadingContent] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [downloadingScope, setDownloadingScope] = useState(false);
+  const [fileActionMsg, setFileActionMsg] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
   const [previewKey, setPreviewKey] = useState(0);
   const [previewLoading, setPreviewLoading] = useState(true);
 
@@ -149,26 +161,58 @@ export function CodePreviewDialog({
   const codeFiles = useMemo(() => files.filter((f) => f.type === "CODE"), [files]);
   const thesisFiles = useMemo(() => files.filter((f) => f.type === "THESIS"), [files]);
   const chartFiles = useMemo(() => files.filter((f) => f.type === "CHART"), [files]);
+  const scopedCodeFiles = useMemo(
+    () => filterCodeFilesByScope(codeFiles, fileScope),
+    [codeFiles, fileScope]
+  );
+  const coreCodeCount = useMemo(
+    () => filterCodeFilesByScope(codeFiles, "core").length,
+    [codeFiles]
+  );
+  const scopeSummaryText = useMemo(
+    () => `${scopedCodeFiles.length}/${codeFiles.length} code files`,
+    [scopedCodeFiles.length, codeFiles.length]
+  );
 
   const backendCodeFiles = useMemo(
-    () => codeFiles.filter((f) => classifyCodeFile(f.path) === "backend"),
-    [codeFiles]
+    () => scopedCodeFiles.filter((f) => classifyCodeFile(f.path) === "backend"),
+    [scopedCodeFiles]
   );
   const frontendCodeFiles = useMemo(
-    () => codeFiles.filter((f) => classifyCodeFile(f.path) === "frontend"),
-    [codeFiles]
+    () => scopedCodeFiles.filter((f) => classifyCodeFile(f.path) === "frontend"),
+    [scopedCodeFiles]
   );
   const sqlCodeFiles = useMemo(
-    () => codeFiles.filter((f) => classifyCodeFile(f.path) === "sql"),
-    [codeFiles]
+    () => scopedCodeFiles.filter((f) => classifyCodeFile(f.path) === "sql"),
+    [scopedCodeFiles]
   );
   const docsCodeFiles = useMemo(
-    () => codeFiles.filter((f) => classifyCodeFile(f.path) === "docs"),
-    [codeFiles]
+    () => scopedCodeFiles.filter((f) => classifyCodeFile(f.path) === "docs"),
+    [scopedCodeFiles]
   );
   const otherCodeFiles = useMemo(
-    () => codeFiles.filter((f) => classifyCodeFile(f.path) === "other"),
-    [codeFiles]
+    () => scopedCodeFiles.filter((f) => classifyCodeFile(f.path) === "other"),
+    [scopedCodeFiles]
+  );
+  const selectableFiles = useMemo(
+    () => [
+      ...backendCodeFiles,
+      ...frontendCodeFiles,
+      ...sqlCodeFiles,
+      ...docsCodeFiles,
+      ...otherCodeFiles,
+      ...thesisFiles,
+      ...chartFiles,
+    ],
+    [
+      backendCodeFiles,
+      frontendCodeFiles,
+      sqlCodeFiles,
+      docsCodeFiles,
+      otherCodeFiles,
+      thesisFiles,
+      chartFiles,
+    ]
   );
 
   const runtimeJob = runtimeStatus?.currentJob ?? null;
@@ -219,28 +263,21 @@ export function CodePreviewDialog({
   );
 
   useEffect(() => {
-    if (open && files.length > 0 && !selectedFileId) {
-      const first =
-        backendCodeFiles[0] ||
-        frontendCodeFiles[0] ||
-        sqlCodeFiles[0] ||
-        docsCodeFiles[0] ||
-        otherCodeFiles[0] ||
-        files[0];
+    if (!open) return;
+    if (selectableFiles.length === 0) {
+      setSelectedFileId(null);
+      setFileContent("");
+      return;
+    }
+
+    const stillSelected =
+      selectedFileId && selectableFiles.some((file) => file.id === selectedFileId);
+    if (!stillSelected) {
+      const first = selectableFiles[0];
       setSelectedFileId(first.id);
       void loadFileContent(first.id);
     }
-  }, [
-    open,
-    files,
-    selectedFileId,
-    backendCodeFiles,
-    frontendCodeFiles,
-    sqlCodeFiles,
-    docsCodeFiles,
-    otherCodeFiles,
-    loadFileContent,
-  ]);
+  }, [open, selectableFiles, selectedFileId, loadFileContent]);
 
   useEffect(() => {
     if (!open) {
@@ -269,6 +306,12 @@ export function CodePreviewDialog({
     setPreviewLoading(true);
   }, [runtimeIframeSrc, previewKey]);
 
+  useEffect(() => {
+    if (!fileActionMsg) return;
+    const timer = setTimeout(() => setFileActionMsg(null), 3500);
+    return () => clearTimeout(timer);
+  }, [fileActionMsg]);
+
   function handleSelectFile(file: FileItem) {
     setSelectedFileId(file.id);
     void loadFileContent(file.id);
@@ -278,6 +321,46 @@ export function CodePreviewDialog({
     await navigator.clipboard.writeText(fileContent);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  }
+
+  async function handleDownloadByScope() {
+    setDownloadingScope(true);
+    setFileActionMsg(null);
+    try {
+      const res = await fetch(
+        `/api/workspace/${workspaceId}/download?type=code&scope=${fileScope}`
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "下载失败，请稍后重试");
+      }
+
+      const blob = await res.blob();
+      const disposition = res.headers.get("content-disposition") || "";
+      const filenameMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+      const filename = filenameMatch
+        ? decodeURIComponent(filenameMatch[1])
+        : `project_code_${fileScope}.zip`;
+      const downloadUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = downloadUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(downloadUrl);
+      setFileActionMsg({
+        type: "success",
+        text: fileScope === "core" ? "核心源码下载已开始" : "全量源码下载已开始",
+      });
+    } catch (err) {
+      setFileActionMsg({
+        type: "error",
+        text: err instanceof Error ? err.message : "下载失败，请稍后重试",
+      });
+    } finally {
+      setDownloadingScope(false);
+    }
   }
 
   async function handleStartRuntimePreview() {
@@ -304,7 +387,7 @@ export function CodePreviewDialog({
     }
   }
 
-  const selectedFile = files.find((f) => f.id === selectedFileId);
+  const selectedFile = selectableFiles.find((f) => f.id === selectedFileId) || null;
 
   function renderFileGroup(label: string, items: FileItem[], icon: typeof Code) {
     if (items.length === 0) return null;
@@ -336,6 +419,17 @@ export function CodePreviewDialog({
               )}
             />
             <span className="truncate flex-1 font-mono">{file.path}</span>
+            {fileScope === "full" && file.type === "CODE" && isCoreCodeFilePath(file.path) && (
+              <Badge
+                variant="secondary"
+                className={cn(
+                  "text-[10px] shrink-0 h-4 px-1",
+                  selectedFileId === file.id && "bg-white/20 text-primary-foreground"
+                )}
+              >
+                核心
+              </Badge>
+            )}
             <span
               className={cn(
                 "text-[10px] shrink-0",
@@ -394,57 +488,125 @@ export function CodePreviewDialog({
         </DialogHeader>
 
         {activeTab === "files" ? (
-          <div className="flex flex-1 min-h-0">
-            <div className="w-56 border-r shrink-0 overflow-y-auto p-2">
-              {renderFileGroup("后端文件", backendCodeFiles, Code)}
-              {renderFileGroup("前端文件", frontendCodeFiles, Code)}
-              {renderFileGroup("SQL 脚本", sqlCodeFiles, Code)}
-              {renderFileGroup("文档说明", docsCodeFiles, FileText)}
-              {renderFileGroup("其他代码", otherCodeFiles, Code)}
-              {renderFileGroup("论文", thesisFiles, FileText)}
-              {renderFileGroup("图表", chartFiles, FileText)}
-            </div>
-            <div className="flex-1 flex flex-col min-w-0">
-              {selectedFile && (
-                <div className="flex items-center justify-between px-4 py-2 border-b bg-muted/30 shrink-0">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <code className="text-xs font-mono truncate">{selectedFile.path}</code>
-                    <Badge variant="outline" className="text-[10px] shrink-0">
-                      {getLanguage(selectedFile.path)}
-                    </Badge>
+          <div className="flex flex-1 min-h-0 flex-col">
+            <div className="px-4 py-3 border-b bg-muted/30 shrink-0">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">源码范围</span>
+                  <div className="inline-flex items-center rounded-lg border bg-white p-0.5">
+                    <button
+                      type="button"
+                      className={cn(
+                        "px-2.5 py-1 text-xs rounded-md transition-colors",
+                        fileScope === "core"
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                      onClick={() => setFileScope("core")}
+                    >
+                      核心
+                    </button>
+                    <button
+                      type="button"
+                      className={cn(
+                        "px-2.5 py-1 text-xs rounded-md transition-colors",
+                        fileScope === "full"
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                      onClick={() => setFileScope("full")}
+                    >
+                      全量
+                    </button>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 text-xs shrink-0"
-                    onClick={handleCopy}
-                    disabled={!fileContent || loadingContent}
-                  >
-                    {copied ? (
-                      <>
-                        <Check className="mr-1 h-3 w-3" />
-                        已复制
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="mr-1 h-3 w-3" />
-                        复制
-                      </>
-                    )}
-                  </Button>
+                  <span className="text-xs text-muted-foreground">{scopeSummaryText}</span>
+                  {fileScope === "core" && (
+                    <Badge variant="outline" className="text-[10px]">
+                      核心文件 {coreCodeCount}
+                    </Badge>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={() => void handleDownloadByScope()}
+                  disabled={downloadingScope || codeFiles.length === 0}
+                >
+                  {downloadingScope ? (
+                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                  ) : (
+                    <Download className="mr-1 h-3 w-3" />
+                  )}
+                  下载{fileScope === "core" ? "核心源码" : "全量源码"}
+                </Button>
+              </div>
+              {fileActionMsg && (
+                <div
+                  className={cn(
+                    "mt-2 rounded-md border px-2.5 py-1.5 text-xs",
+                    fileActionMsg.type === "success"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : "border-rose-200 bg-rose-50 text-rose-700"
+                  )}
+                >
+                  {fileActionMsg.text}
                 </div>
               )}
-              <ScrollArea className="flex-1">
-                {loadingContent ? (
-                  <div className="flex items-center justify-center h-40">
-                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+            <div className="flex flex-1 min-h-0">
+              <div className="w-56 border-r shrink-0 overflow-y-auto p-2">
+                {renderFileGroup("后端文件", backendCodeFiles, Code)}
+                {renderFileGroup("前端文件", frontendCodeFiles, Code)}
+                {renderFileGroup("SQL 脚本", sqlCodeFiles, Code)}
+                {renderFileGroup("文档说明", docsCodeFiles, FileText)}
+                {renderFileGroup("其他代码", otherCodeFiles, Code)}
+                {renderFileGroup("论文", thesisFiles, FileText)}
+                {renderFileGroup("图表", chartFiles, FileText)}
+              </div>
+              <div className="flex-1 flex flex-col min-w-0">
+                {selectedFile && (
+                  <div className="flex items-center justify-between px-4 py-2 border-b bg-muted/30 shrink-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <code className="text-xs font-mono truncate">{selectedFile.path}</code>
+                      <Badge variant="outline" className="text-[10px] shrink-0">
+                        {getLanguage(selectedFile.path)}
+                      </Badge>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs shrink-0"
+                      onClick={handleCopy}
+                      disabled={!fileContent || loadingContent}
+                    >
+                      {copied ? (
+                        <>
+                          <Check className="mr-1 h-3 w-3" />
+                          已复制
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="mr-1 h-3 w-3" />
+                          复制
+                        </>
+                      )}
+                    </Button>
                   </div>
-                ) : (
-                  <pre className="p-4 text-xs font-mono whitespace-pre-wrap break-words leading-relaxed">
-                    {fileContent || "选择左侧文件查看内容"}
-                  </pre>
                 )}
-              </ScrollArea>
+                <ScrollArea className="flex-1">
+                  {loadingContent ? (
+                    <div className="flex items-center justify-center h-40">
+                      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : (
+                    <pre className="p-4 text-xs font-mono whitespace-pre-wrap break-words leading-relaxed">
+                      {fileContent || "选择左侧文件查看内容"}
+                    </pre>
+                  )}
+                </ScrollArea>
+              </div>
             </div>
           </div>
         ) : (

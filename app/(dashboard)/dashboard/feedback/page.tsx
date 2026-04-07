@@ -26,31 +26,88 @@ type LocalImage = {
   previewUrl: string;
 };
 
+type ApiResult = {
+  success?: boolean;
+  data?: unknown;
+  error?: string;
+} | null;
+
 const MAX_IMAGE_COUNT = 3;
 const MAX_IMAGE_SIZE = 2 * 1024 * 1024;
+
+async function parseApiResult(response: Response): Promise<ApiResult> {
+  const rawText = await response.text();
+  if (!rawText) return null;
+  try {
+    return JSON.parse(rawText) as ApiResult;
+  } catch {
+    return null;
+  }
+}
 
 export default function FeedbackPage() {
   const [content, setContent] = useState("");
   const [contact, setContact] = useState("");
   const [images, setImages] = useState<LocalImage[]>([]);
   const [items, setItems] = useState<FeedbackItem[]>([]);
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(10);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function loadFeedbacks() {
+  async function loadFeedbacks(nextPage = page) {
     setLoading(true);
-    const res = await fetch("/api/feedback");
-    const data = await res.json();
-    if (data.success) {
-      setItems(data.data);
+    try {
+      const params = new URLSearchParams({
+        page: String(nextPage),
+        pageSize: String(pageSize),
+      });
+      const res = await fetch(`/api/feedback?${params.toString()}`);
+      const data = await parseApiResult(res);
+
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || "加载反馈记录失败，请刷新重试");
+      }
+
+      const payload =
+        data && typeof data.data === "object" && data.data !== null
+          ? (data.data as {
+              items?: unknown;
+              total?: unknown;
+              page?: unknown;
+              totalPages?: unknown;
+            })
+          : {};
+      setItems(Array.isArray(payload.items) ? payload.items : []);
+      setTotal(typeof payload.total === "number" ? payload.total : 0);
+      setPage(typeof payload.page === "number" ? payload.page : nextPage);
+      setTotalPages(
+        typeof payload.totalPages === "number" && payload.totalPages > 0
+          ? payload.totalPages
+          : 1
+      );
+      setError(null);
+    } catch (loadError) {
+      setItems([]);
+      setTotal(0);
+      setTotalPages(1);
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "加载反馈记录失败，请稍后重试"
+      );
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   useEffect(() => {
-    void loadFeedbacks();
+    void loadFeedbacks(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -113,11 +170,18 @@ export default function FeedbackPage() {
         method: "POST",
         body: formData,
       });
-      const data = await res.json();
-      if (!data.success) {
-        throw new Error(data.error || "图片上传失败");
+      const data = await parseApiResult(res);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || "图片上传失败，请稍后重试");
       }
-      keys.push(data.data.key);
+      const key =
+        typeof (data.data as { key?: unknown } | undefined)?.key === "string"
+          ? (data.data as { key: string }).key
+          : "";
+      if (!key) {
+        throw new Error("图片上传失败，请重试");
+      }
+      keys.push(key);
     }
     return keys;
   }
@@ -146,9 +210,9 @@ export default function FeedbackPage() {
           imageKeys,
         }),
       });
-      const data = await res.json();
-      if (!data.success) {
-        throw new Error(data.error || "提交失败");
+      const data = await parseApiResult(res);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || "提交失败，请稍后重试");
       }
 
       setContent("");
@@ -156,7 +220,7 @@ export default function FeedbackPage() {
       for (const image of images) URL.revokeObjectURL(image.previewUrl);
       setImages([]);
       setMessage("反馈已提交，感谢你的建议");
-      await loadFeedbacks();
+      await loadFeedbacks(1);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "提交失败");
     } finally {
@@ -245,7 +309,7 @@ export default function FeedbackPage() {
 
       <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
         <CardHeader>
-          <CardTitle>我的反馈记录</CardTitle>
+          <CardTitle>我的反馈记录（共 {total} 条）</CardTitle>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -256,38 +320,64 @@ export default function FeedbackPage() {
           ) : items.length === 0 ? (
             <p className="text-sm text-muted-foreground">暂无反馈记录</p>
           ) : (
-            <div className="space-y-3">
-              {items.map((item) => (
-                <div key={item.id} className="rounded-xl border bg-muted/20 p-4">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <Badge variant={item.status === "OPEN" ? "secondary" : "default"}>
-                      {item.status === "OPEN" ? "待处理" : "已处理"}
-                    </Badge>
-                    <span className="text-xs text-muted-foreground">
-                      {new Date(item.createdAt).toLocaleString("zh-CN")}
-                    </span>
+            <div className="space-y-4">
+              <div className="space-y-3">
+                {items.map((item) => (
+                  <div key={item.id} className="rounded-xl border bg-muted/20 p-4">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <Badge variant={item.status === "OPEN" ? "secondary" : "default"}>
+                        {item.status === "OPEN" ? "待处理" : "已处理"}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(item.createdAt).toLocaleString("zh-CN")}
+                      </span>
+                    </div>
+                    <p className="whitespace-pre-wrap text-sm">{item.content}</p>
+                    {item.imageUrls.length > 0 && (
+                      <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3">
+                        {item.imageUrls.map((url, index) => (
+                          <a key={`${item.id}-image-${index}`} href={url} target="_blank" rel="noreferrer">
+                            <img
+                              src={url}
+                              alt={`feedback-${index + 1}`}
+                              className="h-24 w-full rounded-md border object-cover"
+                            />
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                    {item.adminNote && (
+                      <div className="mt-3 rounded-md border border-cyan-200 bg-cyan-50 p-2 text-sm text-cyan-800">
+                        管理员回复：{item.adminNote}
+                      </div>
+                    )}
                   </div>
-                  <p className="whitespace-pre-wrap text-sm">{item.content}</p>
-                  {item.imageUrls.length > 0 && (
-                    <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3">
-                      {item.imageUrls.map((url, index) => (
-                        <a key={`${item.id}-image-${index}`} href={url} target="_blank" rel="noreferrer">
-                          <img
-                            src={url}
-                            alt={`feedback-${index + 1}`}
-                            className="h-24 w-full rounded-md border object-cover"
-                          />
-                        </a>
-                      ))}
-                    </div>
-                  )}
-                  {item.adminNote && (
-                    <div className="mt-3 rounded-md border border-cyan-200 bg-cyan-50 p-2 text-sm text-cyan-800">
-                      管理员回复：{item.adminNote}
-                    </div>
-                  )}
+                ))}
+              </div>
+
+              {totalPages > 1 && (
+                <div className="flex items-center justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={loading || page <= 1}
+                    onClick={() => void loadFeedbacks(page - 1)}
+                  >
+                    上一页
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    第 {page} / {totalPages} 页
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={loading || page >= totalPages}
+                    onClick={() => void loadFeedbacks(page + 1)}
+                  >
+                    下一页
+                  </Button>
                 </div>
-              ))}
+              )}
             </div>
           )}
         </CardContent>

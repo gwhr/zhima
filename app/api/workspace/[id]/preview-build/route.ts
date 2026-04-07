@@ -200,24 +200,12 @@ function buildPreviewHTML(workspace: {
   const tablesJson = JSON.stringify(tableItems);
   const mockDataJson = JSON.stringify(mockData);
   const summary = workspace.requirements.summary || "可运行项目脚手架预览（示例数据）";
-  const roleHtml =
-    roles.length > 0
-      ? roles
-          .map(
-            (role) =>
-              `<li><strong>${escapeHtml(role.name)}</strong><span>${escapeHtml(
-                role.description || "—"
-              )}</span></li>`
-          )
-          .join("")
-      : "<li><strong>默认角色</strong><span>根据你的题目自动生成</span></li>";
-
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>${escapeHtml(workspace.topic)} · 预览</title>
+  <title>${escapeHtml(workspace.topic)} · 关键页面预览</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -225,285 +213,501 @@ function buildPreviewHTML(workspace: {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: #f1f5f9;
       color: #0f172a;
-      height: 100vh;
-      display: grid;
-      grid-template-columns: 250px 1fr;
-    }
-    .sidebar {
-      background: linear-gradient(180deg, #0f172a, #1e293b);
-      color: #cbd5e1;
-      padding: 18px 14px;
+      min-height: 100vh;
       display: flex;
       flex-direction: column;
-      gap: 12px;
-    }
-    .brand h1 {
-      margin: 0;
-      font-size: 18px;
-      color: #fff;
-    }
-    .brand p {
-      margin: 6px 0 0 0;
-      font-size: 12px;
-      color: #94a3b8;
-      line-height: 1.5;
-    }
-    .module-list {
-      margin: 4px 0 0 0;
-      padding: 0;
-      list-style: none;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    .module-list button {
-      width: 100%;
-      border: 0;
-      border-radius: 8px;
-      background: rgba(255,255,255,.06);
-      color: #e2e8f0;
-      text-align: left;
-      padding: 10px 10px;
-      cursor: pointer;
-      font-size: 13px;
-    }
-    .module-list button.active { background: #0ea5e9; color: #fff; }
-    .main {
-      display: flex;
-      flex-direction: column;
-      min-width: 0;
     }
     .header {
-      background: #fff;
+      padding: 18px 20px 14px;
       border-bottom: 1px solid #e2e8f0;
-      padding: 14px 20px;
+      background: #ffffff;
+      box-shadow: 0 10px 26px rgba(15, 23, 42, 0.05);
     }
-    .header h2 {
-      margin: 0;
-      font-size: 19px;
-    }
-    .header p {
-      margin: 6px 0 0 0;
-      color: #475569;
-      font-size: 13px;
-      line-height: 1.5;
-    }
-    .content {
-      padding: 16px 18px;
-      display: grid;
-      grid-template-columns: 1.5fr 1fr;
-      gap: 14px;
-      overflow: auto;
-    }
-    .card {
-      background: #fff;
-      border: 1px solid #e2e8f0;
-      border-radius: 12px;
-      padding: 14px;
-      box-shadow: 0 10px 25px rgba(2, 6, 23, .04);
-    }
-    .card h3 {
-      margin: 0 0 10px 0;
-      font-size: 14px;
-    }
-    .feature-tags {
+    .title {
       display: flex;
+      align-items: center;
+      gap: 10px;
       flex-wrap: wrap;
-      gap: 6px;
-      margin-top: 8px;
     }
-    .feature-tags span {
-      font-size: 12px;
+    .title h1 {
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: 0.2px;
+    }
+    .badge {
       border-radius: 999px;
       padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 600;
       background: #e0f2fe;
       color: #0369a1;
     }
-    table {
-      width: 100%;
-      border-collapse: collapse;
+    .summary {
+      margin: 8px 0 0;
+      font-size: 13px;
+      color: #475569;
+      line-height: 1.6;
     }
-    th, td {
-      padding: 8px 10px;
-      border-bottom: 1px solid #e2e8f0;
-      text-align: left;
-      font-size: 12px;
-      white-space: nowrap;
+    .meta {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
     }
-    th { color: #475569; background: #f8fafc; }
-    .status {
-      display: inline-flex;
+    .meta-item {
+      border: 1px solid #cbd5e1;
+      background: #f8fafc;
       border-radius: 999px;
-      padding: 2px 8px;
-      background: #dbeafe;
-      color: #1d4ed8;
+      padding: 4px 10px;
       font-size: 11px;
+      color: #0f172a;
+    }
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 12px 20px;
+      border-bottom: 1px solid #e2e8f0;
+      background: #f8fafc;
+    }
+    .tab-btn {
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      color: #334155;
+      border-radius: 999px;
+      padding: 7px 14px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all .15s ease;
+    }
+    .tab-btn.active {
+      border-color: #0ea5e9;
+      background: #0ea5e9;
+      color: #fff;
+      box-shadow: 0 8px 20px rgba(14, 165, 233, 0.25);
+    }
+    .tab-content {
+      padding: 18px 20px 22px;
+    }
+    .panel {
+      display: none;
+      gap: 14px;
+    }
+    .panel.active {
+      display: grid;
+    }
+    .panel-home {
+      grid-template-columns: 1.2fr 1fr;
+    }
+    .panel-list {
+      grid-template-columns: 1fr;
+    }
+    .panel-admin {
+      grid-template-columns: 1fr 1fr;
+    }
+    .card {
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      background: #fff;
+      padding: 14px;
+      box-shadow: 0 8px 22px rgba(2, 6, 23, 0.05);
+    }
+    .card h3 {
+      margin: 0 0 10px;
+      font-size: 14px;
+    }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .kpi {
+      border: 1px solid #dbeafe;
+      border-radius: 10px;
+      padding: 10px;
+      background: #eff6ff;
+    }
+    .kpi p {
+      margin: 0;
+      font-size: 11px;
+      color: #475569;
+    }
+    .kpi strong {
+      display: block;
+      margin-top: 6px;
+      font-size: 18px;
+      color: #0f172a;
     }
     .role-list {
       margin: 0;
       padding: 0;
       list-style: none;
-      display: flex;
-      flex-direction: column;
+      display: grid;
       gap: 8px;
     }
     .role-list li {
       border: 1px solid #e2e8f0;
-      border-radius: 8px;
+      border-radius: 10px;
       padding: 8px 10px;
       display: grid;
       gap: 3px;
     }
     .role-list strong { font-size: 13px; }
-    .role-list span { font-size: 12px; color: #64748b; }
-    .runtime-grid {
+    .role-list span { font-size: 12px; color: #64748b; line-height: 1.5; }
+    .module-grid {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
-    .runtime-item {
+    .module-item {
       border: 1px solid #e2e8f0;
-      border-radius: 8px;
-      padding: 9px 10px;
+      border-radius: 10px;
+      padding: 10px;
       background: #f8fafc;
     }
-    .runtime-item p {
+    .module-item h4 {
+      margin: 0;
+      font-size: 13px;
+    }
+    .feature-tags {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .feature-tags span {
+      border-radius: 999px;
+      background: #e0f2fe;
+      color: #0369a1;
+      padding: 3px 8px;
+      font-size: 11px;
+    }
+    .run-card {
+      border: 1px dashed #94a3b8;
+      background: #f8fafc;
+      border-radius: 10px;
+      padding: 10px;
+      font-size: 12px;
+      line-height: 1.6;
+      color: #334155;
+      margin-top: 10px;
+    }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .toolbar select, .toolbar input {
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: #fff;
+      color: #0f172a;
+      font-size: 12px;
+      padding: 7px 10px;
+      min-width: 190px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    th, td {
+      padding: 9px 10px;
+      border-bottom: 1px solid #e2e8f0;
+      text-align: left;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    th { background: #f8fafc; color: #475569; }
+    .status {
+      display: inline-flex;
+      border-radius: 999px;
+      padding: 2px 8px;
+      background: #dcfce7;
+      color: #166534;
+      font-size: 11px;
+    }
+    .admin-kpis {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .admin-card {
+      border-radius: 12px;
+      border: 1px solid #e2e8f0;
+      background: linear-gradient(145deg, #f8fafc, #fff);
+      padding: 12px;
+    }
+    .admin-card p {
       margin: 0;
       font-size: 11px;
       color: #64748b;
     }
-    .runtime-item strong {
+    .admin-card strong {
+      margin-top: 6px;
       display: block;
-      margin-top: 4px;
-      font-size: 13px;
+      font-size: 20px;
       color: #0f172a;
-      word-break: break-all;
     }
-    .runtime-command {
-      margin-top: 10px;
-      border-radius: 8px;
-      background: #0f172a;
-      color: #e2e8f0;
-      padding: 10px;
-      font-size: 12px;
-      line-height: 1.55;
-      overflow-x: auto;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-    @media (max-width: 1000px) {
-      body { grid-template-columns: 1fr; }
-      .sidebar { display: none; }
-      .content { grid-template-columns: 1fr; }
-      .runtime-grid { grid-template-columns: 1fr; }
+    .table-wrap { overflow: auto; border-radius: 10px; }
+    @media (max-width: 980px) {
+      .panel-home, .panel-admin { grid-template-columns: 1fr; }
+      .kpi-grid { grid-template-columns: 1fr; }
+      .module-grid { grid-template-columns: 1fr; }
+      .admin-kpis { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
-  <aside class="sidebar">
-    <div class="brand">
-      <h1>${escapeHtml(workspace.name)}</h1>
-      <p>运行预览（示例数据）</p>
+  <header class="header">
+    <div class="title">
+      <h1>${escapeHtml(workspace.name)} · 关键页面预览</h1>
+      <span class="badge">静态示例</span>
+      <span class="badge">${escapeHtml(previewPreset.label)}</span>
+      <span class="badge">${escapeHtml(databaseLabel)}</span>
+      <span class="badge">${escapeHtml(frontendLabel)}</span>
     </div>
-    <ul class="module-list" id="module-list"></ul>
-  </aside>
-  <main class="main">
-    <header class="header">
-      <h2>${escapeHtml(workspace.topic)}</h2>
-      <p>${escapeHtml(summary)}</p>
-    </header>
-    <section class="content">
-      <article class="card" style="grid-column: 1 / -1;">
-        <h3>预览运行环境</h3>
-        <div class="runtime-grid">
-          <div class="runtime-item">
-            <p>技术栈组合</p>
-            <strong>${escapeHtml(techStackSummary)}</strong>
+    <p class="summary">${escapeHtml(summary)}</p>
+    <div class="meta">
+      <span class="meta-item">主题：${escapeHtml(workspace.topic)}</span>
+      <span class="meta-item">运行方式：${escapeHtml(previewPreset.runtimeName)}</span>
+      <span class="meta-item">默认入口：${escapeHtml(previewPreset.endpointHint)}</span>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="home">首页预览</button>
+    <button class="tab-btn" data-tab="list">列表页预览</button>
+    <button class="tab-btn" data-tab="admin">管理页预览</button>
+  </nav>
+
+  <main class="tab-content">
+    <section class="panel panel-home active" data-panel="home">
+      <article class="card">
+        <h3>项目概览</h3>
+        <div class="kpi-grid">
+          <div class="kpi">
+            <p>系统角色</p>
+            <strong>${roles.length || 1}</strong>
           </div>
-          <div class="runtime-item">
-            <p>运行容器</p>
-            <strong>${escapeHtml(previewPreset.runtimeName)}</strong>
+          <div class="kpi">
+            <p>功能模块</p>
+            <strong>${moduleItems.length}</strong>
           </div>
-          <div class="runtime-item">
-            <p>默认接口入口</p>
-            <strong>${escapeHtml(previewPreset.endpointHint)}</strong>
-          </div>
-          <div class="runtime-item">
-            <p>说明</p>
-            <strong>${escapeHtml(previewPreset.note)}</strong>
+          <div class="kpi">
+            <p>数据库表</p>
+            <strong>${tableItems.length}</strong>
           </div>
         </div>
-        <pre class="runtime-command">${escapeHtml(previewPreset.command)}</pre>
+        <div class="run-card">
+          <strong>本地运行参考命令：</strong><br />
+          ${escapeHtml(previewPreset.command)}<br /><br />
+          <strong>说明：</strong>${escapeHtml(previewPreset.note)}
+        </div>
       </article>
       <article class="card">
-        <h3 id="module-title">模块详情</h3>
-        <div id="module-features" class="feature-tags"></div>
-      </article>
-      <article class="card">
-        <h3>系统角色</h3>
-        <ul class="role-list">
-          ${roleHtml}
-        </ul>
+        <h3>角色权限</h3>
+        <ul class="role-list" id="role-list"></ul>
       </article>
       <article class="card" style="grid-column: 1 / -1;">
-        <h3 id="table-title">数据预览</h3>
-        <div style="overflow:auto;">
+        <h3>功能模块总览</h3>
+        <div class="module-grid" id="module-grid"></div>
+      </article>
+    </section>
+
+    <section class="panel panel-list" data-panel="list">
+      <article class="card">
+        <h3>业务数据列表页</h3>
+        <div class="toolbar">
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <select id="table-select"></select>
+            <input id="search-input" type="text" placeholder="搜索名称关键字（前端筛选）" />
+          </div>
+          <span style="font-size:12px;color:#64748b;">用于模拟用户端/运营端常见列表交互</span>
+        </div>
+        <div class="table-wrap">
           <table>
-            <thead><tr><th>ID</th><th>名称</th><th>状态</th><th>创建时间</th></tr></thead>
-            <tbody id="table-body"></tbody>
+            <thead>
+              <tr><th>ID</th><th>名称</th><th>状态</th><th>创建时间</th></tr>
+            </thead>
+            <tbody id="list-table-body"></tbody>
           </table>
         </div>
       </article>
     </section>
+
+    <section class="panel panel-admin" data-panel="admin">
+      <article class="card">
+        <h3>管理端看板</h3>
+        <div class="admin-kpis">
+          <div class="admin-card">
+            <p>今日请求数</p>
+            <strong>${tableItems.length * 137}</strong>
+          </div>
+          <div class="admin-card">
+            <p>待处理任务</p>
+            <strong>${moduleItems.length * 3}</strong>
+          </div>
+          <div class="admin-card">
+            <p>异常告警</p>
+            <strong>${Math.max(1, Math.floor(moduleItems.length / 2))}</strong>
+          </div>
+          <div class="admin-card">
+            <p>活跃用户</p>
+            <strong>${roles.length * 24 + 86}</strong>
+          </div>
+        </div>
+      </article>
+      <article class="card">
+        <h3>模块管理视图</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>模块</th><th>功能数</th><th>示例状态</th></tr>
+            </thead>
+            <tbody id="admin-module-body"></tbody>
+          </table>
+        </div>
+      </article>
+      <article class="card" style="grid-column: 1 / -1;">
+        <h3>管理说明</h3>
+        <p style="margin:0;font-size:13px;line-height:1.7;color:#334155;">
+          这里展示的是关键页面效果预览，帮助用户理解“生成后大概长什么样”。真实工程代码请在“文件浏览”中查看，
+          并下载到本地后按 README 启动后端与前端服务。
+        </p>
+      </article>
+    </section>
   </main>
+
   <script>
     const modules = ${modulesJson};
     const tables = ${tablesJson};
     const mockData = ${mockDataJson};
-    let active = 0;
+    const roles = ${JSON.stringify(roles.length > 0 ? roles : [{ name: "默认角色", description: "根据你的题目自动生成" }])};
 
-    const moduleList = document.getElementById("module-list");
-    const moduleTitle = document.getElementById("module-title");
-    const moduleFeatures = document.getElementById("module-features");
-    const tableTitle = document.getElementById("table-title");
-    const tableBody = document.getElementById("table-body");
+    const roleList = document.getElementById("role-list");
+    const moduleGrid = document.getElementById("module-grid");
+    const tableSelect = document.getElementById("table-select");
+    const searchInput = document.getElementById("search-input");
+    const listTableBody = document.getElementById("list-table-body");
+    const adminModuleBody = document.getElementById("admin-module-body");
 
-    function render() {
-      moduleList.innerHTML = "";
-      modules.forEach((item, index) => {
+    function renderRoles() {
+      roleList.innerHTML = "";
+      roles.forEach((role) => {
         const li = document.createElement("li");
-        const btn = document.createElement("button");
-        btn.textContent = item.name || ("模块" + (index + 1));
-        if (index === active) btn.classList.add("active");
-        btn.onclick = () => {
-          active = index;
-          render();
-        };
-        li.appendChild(btn);
-        moduleList.appendChild(li);
-      });
-
-      const module = modules[active] || modules[0] || { name: "核心模块", features: [] };
-      moduleTitle.textContent = module.name || "模块详情";
-      moduleFeatures.innerHTML = "";
-      (module.features || []).forEach((feature) => {
-        const tag = document.createElement("span");
-        tag.textContent = feature;
-        moduleFeatures.appendChild(tag);
-      });
-
-      const tableName = tables[active] || tables[0];
-      tableTitle.textContent = "数据预览 · " + tableName;
-      tableBody.innerHTML = "";
-      (mockData[tableName] || []).forEach((row) => {
-        const tr = document.createElement("tr");
-        tr.innerHTML = "<td>" + row.id + "</td><td>" + row.name + "</td><td><span class='status'>" + row.status + "</span></td><td>" + row.createdAt + "</td>";
-        tableBody.appendChild(tr);
+        const title = document.createElement("strong");
+        title.textContent = role.name || "角色";
+        const desc = document.createElement("span");
+        desc.textContent = role.description || "—";
+        li.appendChild(title);
+        li.appendChild(desc);
+        roleList.appendChild(li);
       });
     }
 
-    render();
+    function renderModules() {
+      moduleGrid.innerHTML = "";
+      modules.forEach((module) => {
+        const item = document.createElement("div");
+        item.className = "module-item";
+        const h4 = document.createElement("h4");
+        h4.textContent = module.name || "模块";
+        const tags = document.createElement("div");
+        tags.className = "feature-tags";
+        (module.features || []).slice(0, 6).forEach((feature) => {
+          const tag = document.createElement("span");
+          tag.textContent = feature;
+          tags.appendChild(tag);
+        });
+        if (!tags.childNodes.length) {
+          const tag = document.createElement("span");
+          tag.textContent = "基础增删改查";
+          tags.appendChild(tag);
+        }
+        item.appendChild(h4);
+        item.appendChild(tags);
+        moduleGrid.appendChild(item);
+      });
+    }
+
+    function renderTableOptions() {
+      tableSelect.innerHTML = "";
+      tables.forEach((table) => {
+        const option = document.createElement("option");
+        option.value = table;
+        option.textContent = table;
+        tableSelect.appendChild(option);
+      });
+    }
+
+    function renderListRows() {
+      const tableName = tableSelect.value || tables[0];
+      const keyword = (searchInput.value || "").trim().toLowerCase();
+      const rows = (mockData[tableName] || []).filter((row) =>
+        !keyword || String(row.name || "").toLowerCase().includes(keyword)
+      );
+      listTableBody.innerHTML = "";
+      rows.forEach((row) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td>" + row.id + "</td>" +
+          "<td>" + row.name + "</td>" +
+          "<td><span class='status'>" + row.status + "</span></td>" +
+          "<td>" + row.createdAt + "</td>";
+        listTableBody.appendChild(tr);
+      });
+      if (!rows.length) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = "<td colspan='4' style='text-align:center;color:#94a3b8;'>暂无匹配数据</td>";
+        listTableBody.appendChild(tr);
+      }
+    }
+
+    function renderAdminModules() {
+      adminModuleBody.innerHTML = "";
+      modules.forEach((module, index) => {
+        const tr = document.createElement("tr");
+        const featureCount = Array.isArray(module.features) ? module.features.length : 0;
+        const status = index % 2 === 0 ? "运行中" : "待优化";
+        tr.innerHTML =
+          "<td>" + (module.name || ("模块" + (index + 1))) + "</td>" +
+          "<td>" + (featureCount || 4) + "</td>" +
+          "<td>" + status + "</td>";
+        adminModuleBody.appendChild(tr);
+      });
+    }
+
+    function bindTabs() {
+      const buttons = document.querySelectorAll(".tab-btn");
+      const panels = document.querySelectorAll(".panel");
+      buttons.forEach((button) => {
+        button.addEventListener("click", () => {
+          const tab = button.getAttribute("data-tab");
+          buttons.forEach((b) => b.classList.remove("active"));
+          panels.forEach((p) => p.classList.remove("active"));
+          button.classList.add("active");
+          const target = document.querySelector('.panel[data-panel=\"' + tab + '\"]');
+          if (target) target.classList.add("active");
+        });
+      });
+    }
+
+    renderRoles();
+    renderModules();
+    renderTableOptions();
+    renderListRows();
+    renderAdminModules();
+    bindTabs();
+
+    tableSelect.addEventListener("change", renderListRows);
+    searchInput.addEventListener("input", renderListRows);
   </script>
 </body>
 </html>`;

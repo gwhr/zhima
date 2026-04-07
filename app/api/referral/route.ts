@@ -34,6 +34,34 @@ function buildInviteUrl(origin: string, code: string) {
   return `${origin}/register?ref=${encodeURIComponent(code)}`;
 }
 
+function pickFirstHeaderValue(value: string | null) {
+  if (!value) return "";
+  return value.split(",")[0]?.trim() || "";
+}
+
+function resolvePublicOrigin(req: Request) {
+  const fromEnv = (process.env.NEXTAUTH_URL || "").trim().replace(/\/+$/, "");
+  if (/^https?:\/\//i.test(fromEnv)) {
+    return fromEnv;
+  }
+
+  const forwardedProto = pickFirstHeaderValue(req.headers.get("x-forwarded-proto"));
+  const forwardedHost = pickFirstHeaderValue(req.headers.get("x-forwarded-host"));
+  if (forwardedProto && forwardedHost) {
+    return `${forwardedProto}://${forwardedHost}`.replace(/\/+$/, "");
+  }
+
+  const host = pickFirstHeaderValue(req.headers.get("host"));
+  if (host) {
+    const protocol =
+      forwardedProto ||
+      (host.includes("localhost") || host.startsWith("127.0.0.1") ? "http" : "https");
+    return `${protocol}://${host}`.replace(/\/+$/, "");
+  }
+
+  return new URL(req.url).origin.replace(/\/+$/, "");
+}
+
 function toPayload(inviteCode: Awaited<ReturnType<typeof getOrCreateInviteCode>>, origin: string) {
   return {
     id: inviteCode.id,
@@ -50,7 +78,7 @@ export async function GET(req: Request) {
   if (authError) return authError;
 
   const inviteCode = await getOrCreateInviteCode(session!.user.id);
-  const origin = new URL(req.url).origin;
+  const origin = resolvePublicOrigin(req);
 
   return success(toPayload(inviteCode, origin));
 }
@@ -59,7 +87,7 @@ export async function POST(req: Request) {
   const { session, error: authError } = await requireAuth();
   if (authError) return authError;
 
-  const origin = new URL(req.url).origin;
+  const origin = resolvePublicOrigin(req);
   const url = new URL(req.url);
   const shouldRegenerate = url.searchParams.get("regenerate") === "1";
 

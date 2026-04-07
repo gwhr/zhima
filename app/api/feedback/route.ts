@@ -13,6 +13,16 @@ type FeedbackBody = {
   imageKeys?: string[];
 };
 
+const DEFAULT_PAGE_SIZE = 10;
+const MAX_PAGE_SIZE = 50;
+
+function parsePositiveInt(value: string | null, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
 function normalizeText(value: unknown): string {
   if (typeof value !== "string") return "";
   return value.trim();
@@ -56,85 +66,114 @@ function toFeedbackPayload(item: {
   };
 }
 
-export async function GET() {
-  const { session, error: authError } = await requireAuth();
-  if (authError) return authError;
+export async function GET(req: Request) {
+  try {
+    const { session, error: authError } = await requireAuth();
+    if (authError) return authError;
 
-  const items = await db.userFeedback.findMany({
-    where: { userId: session!.user.id },
-    orderBy: { createdAt: "desc" },
-    take: 30,
-    select: {
-      id: true,
-      content: true,
-      contact: true,
-      pagePath: true,
-      imageKeys: true,
-      status: true,
-      adminNote: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  });
+    const url = new URL(req.url);
+    const page = parsePositiveInt(url.searchParams.get("page"), 1);
+    const pageSize = Math.min(
+      MAX_PAGE_SIZE,
+      parsePositiveInt(url.searchParams.get("pageSize"), DEFAULT_PAGE_SIZE)
+    );
+    const skip = (page - 1) * pageSize;
 
-  return success(items.map((item) => toFeedbackPayload(item)));
+    const where = { userId: session!.user.id };
+    const [rows, total] = await Promise.all([
+      db.userFeedback.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: pageSize,
+        select: {
+          id: true,
+          content: true,
+          contact: true,
+          pagePath: true,
+          imageKeys: true,
+          status: true,
+          adminNote: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      }),
+      db.userFeedback.count({ where }),
+    ]);
+
+    return success({
+      items: rows.map((item) => toFeedbackPayload(item)),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    });
+  } catch (err) {
+    console.error("[api/feedback][GET] failed", err);
+    return error("加载反馈记录失败，请稍后重试", 500);
+  }
 }
 
 export async function POST(req: Request) {
-  const { session, error: authError } = await requireAuth();
-  if (authError) return authError;
-
-  const body = (await req.json().catch(() => null)) as FeedbackBody | null;
-  if (!body) return error("请求参数无效", 400);
-
-  const content = normalizeText(body.content);
-  const contact = normalizeText(body.contact);
-  const pagePath = normalizeText(body.pagePath);
-
-  if (content.length < 5) {
-    return error("反馈内容至少 5 个字符", 400);
-  }
-  if (content.length > 3000) {
-    return error("反馈内容不能超过 3000 个字符", 400);
-  }
-  if (contact.length > 100) {
-    return error("联系方式不能超过 100 个字符", 400);
-  }
-  if (pagePath.length > 200) {
-    return error("页面路径不能超过 200 个字符", 400);
-  }
-
-  let imageKeys: string[] = [];
   try {
-    imageKeys = normalizeImageKeys(body.imageKeys, session!.user.id);
-  } catch (validationError) {
-    return error(
-      validationError instanceof Error ? validationError.message : "图片参数无效",
-      400
-    );
+    const { session, error: authError } = await requireAuth();
+    if (authError) return authError;
+
+    const body = (await req.json().catch(() => null)) as FeedbackBody | null;
+    if (!body) return error("请求参数无效", 400);
+
+    const content = normalizeText(body.content);
+    const contact = normalizeText(body.contact);
+    const pagePath = normalizeText(body.pagePath);
+
+    if (content.length < 5) {
+      return error("反馈内容至少 5 个字符", 400);
+    }
+    if (content.length > 3000) {
+      return error("反馈内容不能超过 3000 个字符", 400);
+    }
+    if (contact.length > 100) {
+      return error("联系方式不能超过 100 个字符", 400);
+    }
+    if (pagePath.length > 200) {
+      return error("页面路径不能超过 200 个字符", 400);
+    }
+
+    let imageKeys: string[] = [];
+    try {
+      imageKeys = normalizeImageKeys(body.imageKeys, session!.user.id);
+    } catch (validationError) {
+      return error(
+        validationError instanceof Error ? validationError.message : "图片参数无效",
+        400
+      );
+    }
+
+    const created = await db.userFeedback.create({
+      data: {
+        userId: session!.user.id,
+        content,
+        contact: contact || null,
+        pagePath: pagePath || null,
+        imageKeys,
+        status: "OPEN",
+      },
+      select: {
+        id: true,
+        content: true,
+        contact: true,
+        pagePath: true,
+        imageKeys: true,
+        status: true,
+        adminNote: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    return success(toFeedbackPayload(created), 201);
+  } catch (err) {
+    console.error("[api/feedback][POST] failed", err);
+    return error("提交反馈失败，请稍后重试", 500);
   }
-
-  const created = await db.userFeedback.create({
-    data: {
-      userId: session!.user.id,
-      content,
-      contact: contact || null,
-      pagePath: pagePath || null,
-      imageKeys,
-      status: "OPEN",
-    },
-    select: {
-      id: true,
-      content: true,
-      contact: true,
-      pagePath: true,
-      imageKeys: true,
-      status: true,
-      adminNote: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  });
-
-  return success(toFeedbackPayload(created), 201);
 }

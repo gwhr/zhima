@@ -400,6 +400,7 @@ export default function WorkspaceDetailPage() {
   const [confirmMsg, setConfirmMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [confirmingPreview, setConfirmingPreview] = useState(false);
   const [previewMsg, setPreviewMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [generateMsg, setGenerateMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [showGuide, setShowGuide] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [tokenSummary, setTokenSummary] = useState<TokenSummary | null>(null);
@@ -503,13 +504,43 @@ export default function WorkspaceDetailPage() {
 
   async function triggerGenerate(type: "code" | "thesis") {
     setGenerating(type);
+    setGenerateMsg(null);
     const endpoints: Record<string, string> = {
       code: "generate-code",
       thesis: "generate-thesis",
     };
-    await fetch(`/api/workspace/${params.id}/${endpoints[type]}`, { method: "POST" });
-    await loadData({ silent: true });
-    setGenerating(null);
+    const labels: Record<string, string> = {
+      code: "代码生成",
+      thesis: "论文生成",
+    };
+
+    try {
+      const response = await fetch(`/api/workspace/${params.id}/${endpoints[type]}`, {
+        method: "POST",
+      });
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) {
+        throw new Error(
+          data?.error ||
+            `${labels[type]}启动失败（HTTP ${response.status}），请稍后重试`
+        );
+      }
+
+      setGenerateMsg({
+        type: "success",
+        text: data?.data?.message || `${labels[type]}任务已提交，正在排队处理`,
+      });
+      await loadData({ silent: true });
+    } catch (err) {
+      setGenerateMsg({
+        type: "error",
+        text:
+          err instanceof Error ? err.message : `${labels[type]}启动失败，请稍后重试`,
+      });
+    } finally {
+      setGenerating(null);
+    }
   }
 
   async function downloadFiles(type: "code" | "thesis" | "chart" | "all") {
@@ -1173,6 +1204,18 @@ cd backend
               <p className="text-xs text-muted-foreground mt-1">按顺序点击下方按钮，AI 将为你逐步生成毕设所需内容</p>
             </CardHeader>
             <CardContent className="space-y-3">
+              {generateMsg && (
+                <p
+                  className={`text-xs rounded-md px-2.5 py-2 ${
+                    generateMsg.type === "error"
+                      ? "bg-red-50 text-red-600 border border-red-200"
+                      : "bg-green-50 text-green-700 border border-green-200"
+                  }`}
+                >
+                  {generateMsg.text}
+                </p>
+              )}
+
               {renderStepCard({
                 step: 1,
                 color: "blue",

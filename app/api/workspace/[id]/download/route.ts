@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth-helpers";
 import { downloadFile } from "@/lib/storage/oss";
 import { getPlatformConfig } from "@/lib/system-config";
 import { hasUserRecharged } from "@/lib/user-entitlements";
+import { filterCodeFilesByScope, type SourceScope } from "@/lib/file-preview-scope";
 import type { FileType } from "@prisma/client";
 import JSZip from "jszip";
 
@@ -18,6 +19,8 @@ export async function GET(
   const { id } = await params;
   const url = new URL(req.url);
   const type = url.searchParams.get("type") || "all";
+  const scopeParam = (url.searchParams.get("scope") || "full").toLowerCase();
+  const scope: SourceScope = scopeParam === "core" ? "core" : "full";
 
   const workspace = await db.workspace.findUnique({ where: { id } });
   if (!workspace) return error("工作空间不存在", 404);
@@ -53,10 +56,19 @@ export async function GET(
   };
   const allowedTypes = typeMap[type] ?? typeMap.all;
 
-  const files = await db.workspaceFile.findMany({
+  let files = await db.workspaceFile.findMany({
     where: { workspaceId: id, type: { in: allowedTypes } },
     orderBy: { path: "asc" },
   });
+
+  if (scope === "core") {
+    const nonCodeFiles = files.filter((file) => file.type !== "CODE");
+    const coreCodeFiles = filterCodeFilesByScope(
+      files.filter((file) => file.type === "CODE"),
+      "core"
+    );
+    files = [...nonCodeFiles, ...coreCodeFiles].sort((a, b) => a.path.localeCompare(b.path));
+  }
 
   if (files.length === 0) {
     return error("暂无可下载的文件", 404);
@@ -96,10 +108,12 @@ export async function GET(
           chart: "图表文件",
         }[type] ?? type;
 
+  const scopeSuffix = scope === "core" ? "_core" : "";
+
   const projectName = workspace.name
     .replace(/[^\w\u4e00-\u9fff]/g, "_")
     .slice(0, 30);
-  const filename = `${projectName}_${filenameSuffix}.zip`;
+  const filename = `${projectName}_${filenameSuffix}${scopeSuffix}.zip`;
 
   return new Response(new Uint8Array(zipBuffer), {
     headers: {
