@@ -8,6 +8,10 @@ export async function GET() {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const paidOrderWhere = {
+    status: "PAID" as const,
+    paidAt: { not: null },
+  };
 
   const [
     userCount,
@@ -31,9 +35,9 @@ export async function GET() {
         createdAt: { gte: today },
       },
     }),
-    db.order.count({ where: { status: "PAID" } }),
+    db.order.count({ where: paidOrderWhere }),
     db.order.aggregate({
-      where: { status: "PAID" },
+      where: paidOrderWhere,
       _sum: { amount: true },
     }),
     db.taskJob.count({
