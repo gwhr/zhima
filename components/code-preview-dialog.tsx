@@ -142,6 +142,8 @@ export function CodePreviewDialog({
   const [fileScope, setFileScope] = useState<SourceScope>("core");
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string>("");
+  const [contentPreviewLimited, setContentPreviewLimited] = useState(false);
+  const [contentPreviewNotice, setContentPreviewNotice] = useState<string | null>(null);
   const [loadingContent, setLoadingContent] = useState(false);
   const [copied, setCopied] = useState(false);
   const [downloadingScope, setDownloadingScope] = useState(false);
@@ -229,12 +231,27 @@ export function CodePreviewDialog({
     async (fileId: string) => {
       setLoadingContent(true);
       setFileContent("");
+      setContentPreviewLimited(false);
+      setContentPreviewNotice(null);
       try {
         const res = await fetch(`/api/workspace/${workspaceId}/files/${fileId}`);
         const data = await res.json();
-        setFileContent(data.success ? data.data.content : "[加载失败]");
+        if (data?.success) {
+          const payload = data.data ?? {};
+          setFileContent(typeof payload.content === "string" ? payload.content : "");
+          setContentPreviewLimited(Boolean(payload.previewLimited));
+          setContentPreviewNotice(
+            typeof payload.previewNotice === "string" && payload.previewNotice.trim()
+              ? payload.previewNotice
+              : null
+          );
+        } else {
+          setFileContent("[加载失败]");
+        }
       } catch {
         setFileContent("[网络错误]");
+        setContentPreviewLimited(false);
+        setContentPreviewNotice(null);
       }
       setLoadingContent(false);
     },
@@ -267,6 +284,8 @@ export function CodePreviewDialog({
     if (selectableFiles.length === 0) {
       setSelectedFileId(null);
       setFileContent("");
+      setContentPreviewLimited(false);
+      setContentPreviewNotice(null);
       return;
     }
 
@@ -283,6 +302,8 @@ export function CodePreviewDialog({
     if (!open) {
       setSelectedFileId(null);
       setFileContent("");
+      setContentPreviewLimited(false);
+      setContentPreviewNotice(null);
       setRuntimeMessage(null);
       setRuntimeError(null);
       setRuntimeStatus(null);
@@ -593,6 +614,18 @@ export function CodePreviewDialog({
                         </>
                       )}
                     </Button>
+                  </div>
+                )}
+                {contentPreviewNotice && (
+                  <div
+                    className={cn(
+                      "mx-3 mt-3 mb-1 rounded-md border px-3 py-2 text-xs shrink-0",
+                      contentPreviewLimited
+                        ? "border-amber-200 bg-amber-50 text-amber-800"
+                        : "border-blue-200 bg-blue-50 text-blue-700"
+                    )}
+                  >
+                    {contentPreviewNotice}
                   </div>
                 )}
                 <ScrollArea className="flex-1">

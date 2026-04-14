@@ -398,8 +398,6 @@ export default function WorkspaceDetailPage() {
   const [reviseDialogOpen, setReviseDialogOpen] = useState(false);
   const [reviseIdea, setReviseIdea] = useState("");
   const [confirmMsg, setConfirmMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [confirmingPreview, setConfirmingPreview] = useState(false);
-  const [previewMsg, setPreviewMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [generateMsg, setGenerateMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [showGuide, setShowGuide] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
@@ -650,7 +648,7 @@ export default function WorkspaceDetailPage() {
     }
   }
 
-  async function confirmPreviewPassed() {
+  /* async function confirmPreviewPassed() {
     setConfirmingPreview(true);
     setPreviewMsg(null);
     try {
@@ -671,7 +669,7 @@ export default function WorkspaceDetailPage() {
     } finally {
       setConfirmingPreview(false);
     }
-  }
+  } */
 
   if (loading) {
     return (
@@ -700,7 +698,6 @@ export default function WorkspaceDetailPage() {
       : "计算机相关专业");
   const featureConfirmed = !!workspace.requirements?.featureConfirmed;
   const difficultyAssessment = workspace.requirements?.difficultyAssessment;
-  const previewConfirmed = !!workspace.requirements?.previewConfirmed;
   const hasCodeFiles = files.some((f) => f.type === "CODE");
   const codeGenerationStarted =
     hasCodeFiles || jobs.some((j) => j.type === "CODE_GEN");
@@ -710,8 +707,7 @@ export default function WorkspaceDetailPage() {
   const hasRunningJob = jobs.some((j) => j.status === "PENDING" || j.status === "RUNNING");
   const operationLocked = generating !== null || hasRunningJob;
   const canGenerateCode = featureConfirmed && !operationLocked && !hasCodeFiles;
-  const canGenerateThesis =
-    hasCodeFiles && previewConfirmed && !isCodeGenerating && !operationLocked;
+  const canGenerateThesis = hasCodeFiles && !isCodeGenerating && !operationLocked;
   const runningCodeJob = jobs.find(
     (j) => j.type === "CODE_GEN" && (j.status === "PENDING" || j.status === "RUNNING")
   );
@@ -1270,8 +1266,6 @@ cd backend
                 ),
                 waitingHint: !hasCodeFiles
                   ? waitingCodeHint
-                  : !previewConfirmed
-                  ? "请先完成步骤3预览确认后再生成论文。"
                   : isCodeGenerating
                   ? "步骤1进行中，暂不可启动论文生成。"
                   : undefined,
@@ -1306,46 +1300,14 @@ cd backend
                   : undefined,
               })}
 
-              {hasCodeFiles && !previewConfirmed && (
-                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 flex flex-wrap items-center gap-2">
-                  <Info className="h-3.5 w-3.5 shrink-0" />
-                  <span className="mr-auto">请先预览代码并确认无问题，再生成论文。</span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={isCodeGenerating}
-                    onClick={() => setShowPreview(true)}
-                  >
-                    先预览
-                  </Button>
-                  <Button
-                    size="sm"
-                    disabled={isCodeGenerating || confirmingPreview}
-                    onClick={() => confirmPreviewPassed()}
-                  >
-                    {confirmingPreview ? (
-                      <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-                    ) : (
-                      <CheckCircle2 className="mr-1.5 h-3 w-3" />
-                    )}
-                    预览通过
-                  </Button>
+              {hasCodeFiles && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 flex items-start gap-2">
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    你现在可以直接生成论文。建议先下载并本地运行代码，确认功能符合要求后再生成论文，
+                    这样论文内容会更贴合你的最终实现。
+                  </span>
                 </div>
-              )}
-
-              {previewConfirmed && (
-                <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-700">
-                  预览已确认，可进行论文生成
-                  {workspace.requirements?.previewConfirmedAt
-                    ? ` · ${new Date(workspace.requirements.previewConfirmedAt).toLocaleString("zh-CN")}`
-                    : ""}
-                </div>
-              )}
-
-              {previewMsg && (
-                <p className={`text-xs ${previewMsg.type === "success" ? "text-green-600" : "text-red-600"}`}>
-                  {previewMsg.text}
-                </p>
               )}
 
               {!featureConfirmed && (
