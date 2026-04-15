@@ -1,10 +1,39 @@
 # 智码 ZhiMa - 开发路线图
 
-> 最后更新: 2026-03-19
+> 最后更新: 2026-04-15
 
 ## 项目简介
 
 智码是一个 AI 驱动的毕业设计辅助工具，帮助计算机专业学生自动生成毕设选题、项目代码和毕业论文。
+
+## 阅读提示
+
+- 本文件保留了 2026-03-19 的基线路线图与基础模块清单。
+- 2026-03-25 之后的交付请同时阅读：
+  - `openspec/ROADMAP.addendum-2026-03-25.md`
+  - `openspec/ROADMAP.addendum-2026-04-15.md`
+- 如果你是新会话接手项目，优先以 addendum 和近期待归档为准，再回看本文件的基线能力。
+
+## 近期增量交付（2026-03-29 至 2026-04-15）
+
+| # | 模块 | Change / 文档 | 状态 | 说明 |
+|---|------|-------------|------|------|
+| 37 | Token 点数计费闭环 | `archive/2026-03-29-token-points-billing` | ✅ | 钱包、冻结、结算、回退、充值流水 |
+| 38 | 用户反馈系统 | `archive/2026-04-15-user-feedback-feature` | ✅ | 用户图文反馈 + 管理端分页检索/处理 |
+| 39 | 运行预览排队/限时会话 | `archive/2026-03-31-workspace-flow-and-runtime-preview` | ✅ | FIFO 排队、免费次数、会话倒计时 |
+| 40 | Auth / Workspace / Billing 稳定性 | `archive/2026-04-02-auth-workspace-billing-stability` | ✅ | 导航回首页、工作空间容错、账单容错、邮箱验证码 |
+| 41 | 免费体验与下载卡点 | `archive/2026-04-02-free-tier-funnel-and-support-contact` | ✅ | 免费工作空间上限、下载充值判断、支持入口 |
+| 42 | 充值套餐发布配置 | `archive/2026-04-02-token-plan-publish-config` | ✅ | 套餐编辑/发布、支付 create/notify 按运行时配置结算 |
+| 43 | 源码范围预览与关键页 | `archive/2026-04-07-source-preview-scope-and-key-pages` | ✅ | `core/full` 预览范围 + key-page runtime preview |
+| 44 | 论文在线预览收口 | `archive/2026-04-14-thesis-online-preview-partial` | ✅ | 普通用户在线只看部分论文正文 |
+
+## 状态校正（2026-04-15）
+
+- 支付回调后订单状态与余额未及时变化：已修复，不再作为主线待办。
+- 工作空间创建失败 / 接口 500 稳定性：已补 fail-soft 与 schema-not-ready 兜底。
+- 用户反馈提交与分页列表一致性：已实现并补回 OpenSpec 归档。
+- 生产与本地配置一致性（支付、短信、OSS、模型）：环境变量模板已同步，平台默认配置已统一。
+- 配置一致性与运行回归基线：统一维护在 `docs/config-consistency-regression-baseline.md`，后续相关改动必须同步更新。
 
 ---
 
@@ -74,29 +103,21 @@
 
 ---
 
-## 剩余待办
+## 当前待办
 
-### P0 - 核心功能完善
-
-| 任务 | 所属模块 | 说明 |
-|------|----------|------|
-| ~~ZIP 打包下载 API~~ | `archive/2026-03-19-oss-complete/oss-integration` | ✅ 已完成：/api/workspace/[id]/download，支持 code/thesis/chart/all |
-| ~~生成代码质量优化~~ | `archive/2026-03-19-roadmap-done/worker-logic` | ✅ 已完成：code-gen prompt 升级 + 路径清洗/去重 + README 兜底 + 最少文件校验 |
-| ~~功能确认闸门（新增）~~ | `archive/2026-03-19-feature-confirmation-gate/feature-confirmation-gate` | ✅ 已完成：工作空间详情页新增“功能确认闸门”，支持修改想法→AI 重分析→难度评估→再生成代码 |
-
-### P1 - 体验优化
+### P0 - 生产准备与回归
 
 | 任务 | 所属模块 | 说明 |
 |------|----------|------|
-| ~~论文模板上传~~ | `archive/2026-03-19-oss-complete/oss-integration` | ✅ 已完成：/api/workspace/[id]/upload-template（浏览器上传已验证） |
-| 真实 OSS 接入 | `archive/2026-03-19-oss-complete/oss-integration` | 配置阿里云 OSS SDK 替换本地存储（生产环境） |
+| 真实 OSS 接入 | `archive/2026-03-19-oss-complete/oss-integration` | 用阿里云 OSS 替换生产环境本地存储模式 |
+| 部署后回归基线固化 | `docs/` + `openspec/` | 每次部署后优先验证工作空间创建、充值回调、反馈列表/提交、管理端用户/流水/模型页 |
 
-### P2 - 上线部署
+### P1 - 运维文档与上线项
 
 | 任务 | 所属模块 | 说明 |
 |------|----------|------|
-| 数据库备份脚本 | `archive/2026-03-19-roadmap-done/deployment` | scripts/backup.sh |
-| 部署文档 | `archive/2026-03-19-roadmap-done/deployment` | docs/deployment.md |
+| 数据库备份脚本 | `archive/2026-03-19-roadmap-done/deployment` | `scripts/backup.sh` |
+| 部署文档 | `archive/2026-03-19-roadmap-done/deployment` | `docs/deployment.md` |
 | 域名 + HTTPS | `archive/2026-03-19-roadmap-done/deployment` | Nginx SSL 配置 |
 
 ---
@@ -117,6 +138,8 @@
 ---
 
 ## 文件统计
+
+> 注：以下统计主要代表 2026-03-19 基线数据；03-29 之后新增的钱包、反馈、管理端、预览和配置能力未全部回写到这里，实际情况请以代码库与 addendum 为准。
 
 - 应用页面: 13
 - API 路由: 32

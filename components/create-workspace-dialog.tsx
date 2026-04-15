@@ -69,6 +69,7 @@ interface ExpandedRequirements {
 
 type Step = "keyword" | "pick-topic" | "tech-stack" | "requirements" | "confirm";
 type MajorCategory = "computer" | "non-computer";
+type CreationMode = "recommend" | "topic-only" | "topic-with-features";
 
 const majorCategoryLabels: Record<MajorCategory, string> = {
   computer: "计算机相关专业",
@@ -118,6 +119,161 @@ function getOptionLabel(options: TechOption[], value: string): string {
   return options.find((item) => item.value === value)?.label ?? value;
 }
 
+function stripListPrefix(line: string): string {
+  return line
+    .replace(/^\s*[-*•]\s+/, "")
+    .replace(/^\s*\d+[\.\)\u3001]\s+/, "")
+    .trim();
+}
+
+function splitFeatureItems(raw: string): string[] {
+  return raw
+    .split(/[、，,；;|/]/)
+    .map((item) => stripListPrefix(item))
+    .filter(Boolean);
+}
+
+function pushUniqueFeatures(target: string[], incoming: string[]) {
+  for (const item of incoming) {
+    if (!target.includes(item)) {
+      target.push(item);
+    }
+  }
+}
+
+function buildRequirementsFromManualInput(
+  rawText: string,
+  topic: string,
+  majorCategory: MajorCategory
+): ExpandedRequirements {
+  const lines = rawText
+    .split(/\r?\n/)
+    .map((line) => stripListPrefix(line))
+    .filter(Boolean);
+
+  const modules: RequirementModule[] = [];
+  const looseFeatures: string[] = [];
+  let currentModule: RequirementModule | null = null;
+
+  for (const line of lines) {
+    if (/^角色[:：]/.test(line) || /^数据库[:：]/.test(line)) {
+      continue;
+    }
+
+    const separatorMatch = line.match(/^(.+?)[：:]\s*(.+)$/);
+    if (separatorMatch) {
+      const moduleName = separatorMatch[1].replace(/模块$/, "").trim();
+      const featureText = separatorMatch[2].trim();
+      const features = splitFeatureItems(featureText);
+
+      if (moduleName) {
+        const module: RequirementModule = {
+          name: moduleName,
+          features: [],
+          enabled: true,
+        };
+        if (features.length > 0) {
+          pushUniqueFeatures(module.features, features);
+        }
+        modules.push(module);
+        currentModule = module;
+        continue;
+      }
+    }
+
+    const inlineFeatures = splitFeatureItems(line);
+    if (inlineFeatures.length > 1) {
+      if (currentModule) {
+        pushUniqueFeatures(currentModule.features, inlineFeatures);
+      } else {
+        pushUniqueFeatures(looseFeatures, inlineFeatures);
+      }
+      continue;
+    }
+
+    if (currentModule) {
+      pushUniqueFeatures(currentModule.features, [line]);
+    } else {
+      pushUniqueFeatures(looseFeatures, [line]);
+    }
+  }
+
+  const normalizedModules = modules
+    .map((module) => ({
+      ...module,
+      features: module.features.filter(Boolean),
+    }))
+    .filter((module) => module.name && module.features.length > 0);
+
+  if (looseFeatures.length > 0) {
+    normalizedModules.push({
+      name: "自定义功能清单",
+      features: looseFeatures,
+      enabled: true,
+    });
+  }
+
+  if (normalizedModules.length === 0 && lines.length > 0) {
+    normalizedModules.push({
+      name: "核心功能",
+      features: lines.slice(0, 20),
+      enabled: true,
+    });
+  }
+
+  const roleLine = lines.find((line) => /^角色[:：]/.test(line));
+  const roleNames =
+    roleLine?.split(/[:：]/)[1]?.split(/[、，,；;|/]/).map((item) => item.trim()).filter(Boolean) ?? [];
+  const defaultRoles =
+    majorCategory === "computer"
+      ? [
+          { name: "用户", description: "使用系统核心业务功能" },
+          { name: "管理员", description: "负责数据、权限与流程管理" },
+        ]
+      : [
+          { name: "业务用户", description: "日常录入、查询和处理业务数据" },
+          { name: "管理员", description: "维护系统配置与审核流程" },
+        ];
+  const roles =
+    roleNames.length > 0
+      ? roleNames.slice(0, 4).map((name) => ({
+          name,
+          description: "来自用户提供的角色定义",
+        }))
+      : defaultRoles;
+
+  const featureCount = normalizedModules.reduce((sum, module) => sum + module.features.length, 0);
+  const estimatedTables = Math.max(5, Math.min(20, Math.ceil(featureCount * 0.8)));
+  const estimatedApis = Math.max(8, featureCount * 2);
+  const estimatedPages = Math.max(6, Math.ceil(featureCount * 0.8));
+  const estimatedWords = Math.max(12000, 10000 + featureCount * 400);
+  const difficulty = Math.max(2, Math.min(5, Math.round(featureCount / 5) + 2));
+
+  const tableCandidates = ["users", "roles", "logs"];
+  const joinedFeatureText = normalizedModules
+    .flatMap((module) => [module.name, ...module.features])
+    .join(" ")
+    .toLowerCase();
+  if (/订单|交易|支付/.test(joinedFeatureText)) tableCandidates.push("orders", "payments");
+  if (/商品|库存|菜单|图书|课程/.test(joinedFeatureText)) tableCandidates.push("products");
+  if (/评价|评论|反馈/.test(joinedFeatureText)) tableCandidates.push("comments");
+  if (/通知|消息/.test(joinedFeatureText)) tableCandidates.push("notifications");
+  const tables = Array.from(new Set(tableCandidates)).slice(0, estimatedTables);
+
+  return {
+    summary: `基于你提供的功能点，已整理为 ${normalizedModules.length} 个模块、${featureCount} 项核心功能。你可以在下一步继续勾选与微调。`,
+    roles,
+    modules: normalizedModules,
+    tables,
+    difficulty,
+    feasibility: `该方案来自你提供的现成功能清单，适合在「${topic}」基础上直接落地开发与论文撰写。`,
+    estimatedPages,
+    estimatedApis,
+    estimatedTables,
+    estimatedWords,
+  };
+}
+
 export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) {
   const router = useRouter();
 
@@ -125,6 +281,7 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
   const [loading, setLoading] = useState(false);
   const [loadingHint, setLoadingHint] = useState("");
   const [error, setError] = useState("");
+  const [creationMode, setCreationMode] = useState<CreationMode>("recommend");
 
   // Step 1: keyword
   const [keyword, setKeyword] = useState("");
@@ -134,6 +291,7 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
   // Step 2: topic
   const [selectedTopic, setSelectedTopic] = useState("");
   const [customTopic, setCustomTopic] = useState("");
+  const [manualFeatureInput, setManualFeatureInput] = useState("");
 
   // Step 3: tech stack
   const [majorCategory, setMajorCategory] = useState<MajorCategory>("computer");
@@ -147,11 +305,13 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
 
   function reset() {
     setStep("keyword");
+    setCreationMode("recommend");
     setKeyword("");
     setSuggestions([]);
     setTopicBatch(1);
     setSelectedTopic("");
     setCustomTopic("");
+    setManualFeatureInput("");
     setMajorCategory("computer");
     setBackend("java-springboot");
     setDatabase("mysql");
@@ -168,6 +328,10 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
   }
 
   const finalTopic = customTopic || selectedTopic;
+  const isManualFeatureMode = creationMode === "topic-with-features";
+  const canProceedFromPickTopic = isManualFeatureMode
+    ? Boolean(finalTopic.trim() && manualFeatureInput.trim())
+    : Boolean(finalTopic.trim());
   const backendLabel = getOptionLabel(backendOptions, backend);
   const databaseLabel = getOptionLabel(databaseOptions, database);
   const frontendLabel = getOptionLabel(frontendOptions, frontend);
@@ -189,6 +353,9 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
   async function searchTopics(options?: { append?: boolean }) {
     if (!keyword.trim()) return;
     const append = options?.append ?? false;
+    if (!append) {
+      setCreationMode("recommend");
+    }
     const nextBatch = append ? topicBatch + 1 : 1;
     const existingTitles = append ? suggestions.map((item) => item.title) : [];
     setLoading(true);
@@ -275,6 +442,26 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
     setLoading(false);
   }
 
+  async function handleProceedFromTechStack() {
+    if (isManualFeatureMode) {
+      const manual = manualFeatureInput.trim();
+      if (!manual || !finalTopic.trim()) {
+        setError("请先填写题目和功能点");
+        return;
+      }
+      setError("");
+      const manualRequirements = buildRequirementsFromManualInput(
+        manual,
+        finalTopic,
+        majorCategory
+      );
+      setRequirements(manualRequirements);
+      setStep("requirements");
+      return;
+    }
+    await expandRequirements();
+  }
+
   function toggleModule(index: number) {
     if (!requirements) return;
     const updated = { ...requirements };
@@ -305,6 +492,10 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
             tables: requirements?.tables,
             majorCategory,
             majorCategoryLabel: majorCategoryLabels[majorCategory],
+            requirementSource:
+              creationMode === "topic-with-features" ? "manual-features" : "ai-recommend",
+            manualFeatureInput:
+              creationMode === "topic-with-features" ? manualFeatureInput.trim() : undefined,
           },
         }),
       });
@@ -458,13 +649,28 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
                   <span className="text-xs text-muted-foreground">或者</span>
                   <div className="h-px flex-1 bg-border" />
                 </div>
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => setStep("pick-topic")}
-                >
-                  我已有题目，直接输入
-                </Button>
+                <div className="space-y-2">
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => {
+                      setCreationMode("topic-only");
+                      setStep("pick-topic");
+                    }}
+                  >
+                    我已有题目，直接输入
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => {
+                      setCreationMode("topic-with-features");
+                      setStep("pick-topic");
+                    }}
+                  >
+                    我已有题目和功能点，直接导入
+                  </Button>
+                </div>
               </>
             )}
           </div>
@@ -473,7 +679,7 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
         {/* Step 2: Pick Topic */}
         {step === "pick-topic" && (
           <div className="space-y-4">
-            {suggestions.length > 0 && (
+            {creationMode === "recommend" && suggestions.length > 0 && (
               <>
                 <p className="text-sm text-muted-foreground">
                   AI 已按信息系统/软件类方向 + 你选择的技术栈推荐题目。选好后下一步会看到完整功能清单，你可以自由增减。
@@ -565,6 +771,14 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
               </>
             )}
 
+            {creationMode === "topic-with-features" && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-2.5">
+                <p className="text-xs text-blue-700">
+                  你可以直接粘贴现成的功能清单（模块/角色/功能点），系统会自动整理成可勾选的需求结构，后续仍可继续调整。
+                </p>
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label>或自定义题目</Label>
               <Input
@@ -580,6 +794,21 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
               </p>
             </div>
 
+            {isManualFeatureMode && (
+              <div className="space-y-2">
+                <Label>粘贴你的功能点清单（必填）</Label>
+                <Textarea
+                  placeholder={`示例：\n角色：用户、管理员\n用户模块：注册登录、个人资料、消息通知\n商品模块：发布商品、编辑商品、商品列表、分类筛选\n订单模块：下单、支付、订单状态跟踪、退款申请\n管理模块：用户管理、商品审核、订单管理、公告管理`}
+                  value={manualFeatureInput}
+                  onChange={(e) => setManualFeatureInput(e.target.value)}
+                  rows={8}
+                />
+                <p className="text-xs text-muted-foreground">
+                  支持“模块：功能1、功能2”或按行罗列。进入下一步后可继续勾选与微调。
+                </p>
+              </div>
+            )}
+
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setStep("keyword")}>
                 <ArrowLeft className="mr-1 h-4 w-4" />
@@ -587,7 +816,7 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
               </Button>
               <Button
                 className="flex-1"
-                disabled={!finalTopic}
+                disabled={!canProceedFromPickTopic}
                 onClick={() => setStep("tech-stack")}
               >
                 下一步
@@ -603,6 +832,14 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
             <div className="rounded-lg bg-muted/50 p-3">
               <p className="text-sm font-medium">选题：{finalTopic}</p>
             </div>
+
+            {isManualFeatureMode && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5">
+                <p className="text-xs text-amber-700">
+                  当前为“题目 + 功能点直导”模式：本步完成后将直接生成需求清单，不再调用选题扩展接口。
+                </p>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label>专业分类</Label>
@@ -708,7 +945,7 @@ export function CreateWorkspaceDialog({ open, onOpenChange, onCreated }: Props) 
                 <ArrowLeft className="mr-1 h-4 w-4" />
                 返回
               </Button>
-              <Button className="flex-1" onClick={expandRequirements} disabled={loading}>
+              <Button className="flex-1" onClick={handleProceedFromTechStack} disabled={loading}>
                 {loading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />

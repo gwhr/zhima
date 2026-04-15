@@ -128,6 +128,8 @@ pnpm worker:dev
 │   └── schema.prisma           # 数据库 Schema（10 个模型）
 ├── openspec/                   # 开发文档和任务跟踪
 │   ├── ROADMAP.md              # 开发路线图
+│   ├── ROADMAP.addendum-2026-03-25.md
+│   ├── ROADMAP.addendum-2026-04-15.md
 │   └── changes/                # 各模块详细设计文档
 ├── docker-compose.yml          # 开发环境（PG + Redis）
 ├── docker-compose.prod.yml     # 生产环境
@@ -143,6 +145,16 @@ pnpm worker:dev
 | `pnpm worker:dev` | 启动 Worker 进程（代码/论文生成）|
 | `pnpm build` | 构建生产版本 |
 | `pnpm start` | 启动生产服务器 |
+
+## OpenSpec 阅读顺序
+
+如果你是新会话接手项目，建议按下面顺序读：
+
+1. `openspec/ROADMAP.md`
+2. `openspec/ROADMAP.addendum-2026-03-25.md`
+3. `openspec/ROADMAP.addendum-2026-04-15.md`
+4. `docs/config-consistency-regression-baseline.md`
+5. `openspec/changes/archive/` 下最近归档
 
 ## 浏览器全链路实测（Live）
 
@@ -234,4 +246,4 @@ docker compose ps  # 确认 postgres 和 redis 都是 Running
 - 代码生成、论文生成、AI 对话都会记录 `AiUsageLog` 的 `inputTokens/outputTokens`。
 - 系统按用户历史 `AiUsageLog` 聚合计算 `tokenUsed`，并与 `DEFAULT_USER_TOKEN_BUDGET` 比较。
 - 当余额不足时，接口会返回 `402`，任务不会进入队列。
-- 下载能力一期保持开放，不做下载拦截。
+- 下载能力受平台策略控制：当 `REQUIRE_RECHARGE_FOR_DOWNLOAD=true` 时，用户需先完成充值后才能下载完整包。
