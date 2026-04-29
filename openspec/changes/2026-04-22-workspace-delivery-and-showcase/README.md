@@ -6,10 +6,13 @@ Covered areas:
 
 - keep the current create-workspace wizard flow
 - redesign workspace detail into a delivery-oriented workbench
+- refine workspace information hierarchy so the requirement document leads the page
+- demote token/support/statistics content out of the primary workspace surface
 - sunset runtime-preview UI and queue/session wording from the user surface
 - keep source browsing/download as the core artifact view
 - add a standalone showcase gallery entry with placeholder curated cases
 - align the commercial trigger to code generation instead of preview/download wording
+- verify the reworked workspace surface in production after deployment
 
 Change unit:
 

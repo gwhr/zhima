@@ -157,6 +157,31 @@ pnpm worker:dev
 5. `openspec/changes/` 下当前进行中的变更
 6. `openspec/changes/archive/` 下最近归档
 
+## 生产部署现状（2026-04-29 校验）
+
+这部分是基于 2026-04-29 对线上机器的实际核对，不是推测：
+
+1. 线上仓库目录当前是 `/opt/zhima`。
+2. 公网 `80/443` 当前由宿主机上的 `nginx` 进程持有，并反代到应用容器的 `3000` 端口。
+3. `docker-compose.prod.yml` 里的 `app`/`worker` 是当前真实上线链路；其中 `nginx` 服务目前不在现网入口路径上，直接启动会和宿主机 `nginx` 抢占 `80/443`。
+4. `Dockerfile` 产出的 `app` 镜像是 Next.js standalone 运行镜像，不包含完整 `node_modules` 与 Prisma CLI；`Dockerfile.worker` 产出的 `worker` 镜像才携带完整依赖。
+5. 当前生产库尚未建立 Prisma migration baseline，直接执行 `npx prisma migrate deploy` 会报 `P3005`。如果本次发布不涉及 `prisma/schema.prisma` 变化，不要机械执行迁移；如果涉及 schema 变更，先单独制定 baseline / migration 方案。
+
+当前更贴近真实情况的生产发布顺序是：
+
+```bash
+cd /opt/zhima
+git pull --ff-only origin main
+docker compose -f docker-compose.prod.yml build app worker
+docker compose -f docker-compose.prod.yml up -d --force-recreate app worker
+curl -I https://www.cloudzhima.com
+```
+
+补充说明：
+
+- 如果你未来要把公网入口切换回 `docker-compose.prod.yml` 里的 `nginx` 服务，先处理宿主机 `nginx` 的端口归属，不要直接 `up -d nginx`。
+- 更完整的生产注意事项请同时阅读 `docs/config-consistency-regression-baseline.md` 和 `docs/HANDOVER-NEW-SESSION-2026-04-15.md`。
+
 ## 浏览器全链路实测（Live）
 
 该项目已内置 Playwright 全链路用例：`e2e/full-flow.live.spec.ts`  

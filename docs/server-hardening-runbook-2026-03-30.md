@@ -34,9 +34,21 @@
    ```
 5. 业务进程健康确认（收紧前先确保服务正常）：
    ```bash
-   docker compose ps
+   cd /opt/zhima
+   docker compose -f docker-compose.prod.yml ps
    curl -I http://127.0.0.1:3000
+   curl -I https://www.cloudzhima.com
    ```
+
+## 3.1 当前线上实际拓扑（2026-04-29 校验）
+
+这部分是本次真实上线核对出来的现状，执行收紧前先按它判断，不要照着理想状态假设：
+
+1. 当前线上仓库目录是 `/opt/zhima`。
+2. 公网 `80/443` 当前由宿主机 `nginx` 进程持有，并反代到容器内 `app:3000`。
+3. `docker-compose.prod.yml` 中的 `app`/`worker` 是当前真实发布链路；`nginx` 服务当前不在现网流量路径上。
+4. 如果直接启动 compose 里的 `nginx` 服务，会与宿主机 `nginx` 争抢 `80/443` 端口。
+5. 因此在做 SSH/端口收紧之前，先确认你是否继续维持“宿主机 `nginx` + compose `app/worker`”拓扑；如果要切回容器 `nginx`，需要单独安排入口切换窗口。
 
 ## 4. 推荐执行顺序（强烈按顺序）
 
@@ -118,6 +130,24 @@ sudo fail2ban-client status sshd
 6. `SMS_VERIFY_MAX_ATTEMPTS`
 
 并确认 Nginx 或网关层存在基本请求限速（可后续补）。
+
+## 4.5 部署链路与入口归属先校验，再做收紧
+
+在真正收紧端口和 SSH 之前，先跑一遍下面的检查，避免你误把正在工作的入口收掉：
+
+```bash
+cd /opt/zhima
+git rev-parse --short HEAD
+docker compose -f docker-compose.prod.yml ps
+ss -ltnp '( sport = :80 or sport = :443 )'
+systemctl status nginx --no-pager
+curl -I https://www.cloudzhima.com
+```
+
+预期解释：
+
+1. 如果 `80/443` 显示的是宿主机 `nginx`，就按宿主机入口来做安全收紧，不要默认操作 compose `nginx`。
+2. 如果未来入口拓扑变了，就必须先同步更新 `docs/config-consistency-regression-baseline.md` 和交接文档，再继续执行本 runbook。
 
 ## 5. 验收标准（执行后必须逐条通过）
 

@@ -3,19 +3,22 @@
 > 用途：你准备开一个新会话时，把这份文档发给新会话，让它快速接管项目并继续开发。  
 > 仓库：`gwhr/zhima`  
 > 分支：`main`
-> 最新提交：`57eb3c8 chore: checkpoint current progress`（已推送到 `origin/main`）  
+> 最新提交：`4b46d48 feat: rework workspace delivery and showcase flow`（已推送到 `origin/main`）  
 > 当前工作区状态：干净，无未提交改动
 
 ## 0. 本次会话最新结论（给换电脑继续的人先看）
 
-1. 当前代码和文档已经统一提交并推送到远端：`57eb3c8`。
+1. 当前代码和文档已经统一提交并推送到远端：`4b46d48`。
 2. 本次已完成的主要内容：
    - 更新交接文档与 OpenSpec 主线说明。
    - 新增活文档 [config-consistency-regression-baseline.md](/D:/code/plantcloud/毕设助手/docs/config-consistency-regression-baseline.md)。
    - 补齐 `2026-04-15-user-feedback-feature` 与 `2026-04-15-config-consistency-regression-baseline` 两组 OpenSpec 归档。
-   - 保留并提交了 [create-workspace-dialog.tsx](/D:/code/plantcloud/毕设助手/components/create-workspace-dialog.tsx) 中“题目 + 功能点直导”相关改动。
-3. 本次没有完成线上代码更新。阻塞原因不是代码本身，而是当前电脑的网络/VPN/Mihomo 出站规则变化，导致 `ssh root@47.238.84.115` 在当前网络下不稳定，出现直接断开。
-4. 下一台电脑接手时，先 `git pull origin main`，确认拿到 `57eb3c8`，再继续本地验证或服务器部署。
+   - 完成“三栏工作台 + 源码浏览/下载 + 精选案例”改版，并推送到 `main`。
+3. 已完成线上代码同步：服务器目录确认在 `/opt/zhima`，线上 `app/worker` 已切到新镜像，`https://www.cloudzhima.com` 于 2026-04-29 校验返回 `200 OK`。
+4. 这次部署同时确认了两个重要现实：
+   - 公网 `80/443` 当前由宿主机 `nginx` 持有，不是 `docker-compose.prod.yml` 里的 `nginx` 容器。
+   - 生产库尚未建立 Prisma migration baseline，`prisma migrate deploy` 不能作为默认上线动作。
+5. 下一台电脑接手时，先 `git pull origin main`，确认拿到 `4b46d48`，再继续本地验证或后续迭代。
 
 ## 1. 新会话必须先做的事（阅读顺序）
 
@@ -71,9 +74,11 @@
    - 用户反馈提交与列表
    - 管理端用户/流水/模型页可正常加载
 4. 部署后若出现 500，先看容器日志再改代码，不要盲目重建数据库
-5. 当前已知线上目标机器是 `47.238.84.115`，但本次会话没有完成线上目录确认与代码同步；恢复 SSH 后先检查服务器项目目录、当前容器状态与 `docker compose` 工作目录，再执行更新
-6. 如果 `ssh root@47.238.84.115` 直接出现 `Connection closed by 47.238.84.115 port 22`，优先排查本机 VPN / Mihomo / TUN 路由规则，不要先怀疑代码
-7. 不要把生产凭据、服务器密码、`.env.production` 内容写入仓库文档
+5. 当前已确认线上目标机器是 `47.238.84.115`，项目目录是 `/opt/zhima`
+6. 当前公网 `80/443` 由宿主机 `nginx` 占用并反代到 `app:3000`；不要默认认为 compose 里的 `nginx` 服务正在接公网流量
+7. `docker-compose.prod.yml` 里的 `nginx` 服务当前如果直接 `up -d`，会与宿主机 `nginx` 发生端口冲突
+8. 当前生产库尚未建立 Prisma migration baseline；如果发布不涉及 schema 变更，不要机械执行 `prisma migrate deploy`
+9. 不要把生产凭据、服务器密码、`.env.production` 内容写入仓库文档
 
 ## 5. OpenSpec 工作规范（必须遵守）
 
@@ -105,12 +110,11 @@
 
 ## 7. 当前建议优先关注点
 
-1. 新电脑先执行 `git pull origin main`，确认 HEAD 是 `57eb3c8`。
+1. 新电脑先执行 `git pull origin main`，确认 HEAD 是 `4b46d48`。
 2. 先做一轮本地启动与回归，确认当前仓库在你接手时的真实可用状态。
-3. 当前有一个进行中的产品改版方向：去掉运行预览，改成“三栏工作台 + 源码浏览/下载 + 精选案例”。
-4. 如需继续生产部署，先恢复本机到 `47.238.84.115:22` 的稳定 SSH 路径，再上服务器确认项目目录与容器状态。
-5. 生产相关仍应重点关注真实 OSS 接入、部署文档、备份脚本与 HTTPS。
-6. 若后续继续改业务功能，以上 4 项应按“回归检查项”对待，而不是重新当作待修主线。
+3. 当前产品主流程改版已上线，后续重点是补真实“精选案例”内容，而不是回头恢复运行预览。
+4. 生产相关仍应重点关注真实 OSS 接入、部署文档、宿主机 `nginx` / compose `nginx` 拓扑收口、以及 Prisma migration baseline。
+5. 若后续继续改业务功能，支付回调、工作空间稳定性、用户反馈、配置一致性这几项应按“回归检查项”对待，而不是重新当作待修主线。
 
 ## 8. 可直接复制给“新会话”的首条提示词
 
@@ -124,11 +128,16 @@
 
 - 当前远端 `origin/main` 已包含这次会话全部成果；换电脑无需拷贝本地文件，直接拉最新代码即可
 - 当前仓库没有未提交改动；如果新电脑出现差异，先检查是否拉到了旧提交
-- 本次尝试过服务器部署，但因为当前电脑网络环境变化导致 SSH 直连异常，所以“线上代码同步/更新生产代码”尚未执行
+- 本次已经完成服务器部署，并额外核对出：
+  - 线上仓库目录：`/opt/zhima`
+  - 当前公网入口：宿主机 `nginx`
+  - 当前真实发布链路：`git pull` -> `docker compose -f docker-compose.prod.yml build app worker` -> `docker compose -f docker-compose.prod.yml up -d --force-recreate app worker`
+  - `docker-compose.prod.yml` 中的 `nginx` 服务当前不应默认启动
+  - 生产数据库暂时不能把 `prisma migrate deploy` 当成通用发布步骤
 - 若后续继续服务器部署，建议先在新电脑上确认：
-  - `ssh root@47.238.84.115` 能进入密码提示
-  - Mihomo / TUN 对 `47.238.84.115/32` 的出站规则稳定
-  - 再上服务器执行目录探测、代码同步与容器重启
+  - `ssh root@47.238.84.115` 能稳定进入 shell
+  - `ss -ltnp '( sport = :80 or sport = :443 )'` 仍显示宿主机 `nginx` 持有公网端口
+  - 再执行代码同步与 `app/worker` 重建
 - 如果新会话遇到命令行 `node/pnpm` 识别异常，优先检查 PATH 是否被会话污染
 - Windows 场景可先用绝对路径临时执行 `pnpm.cmd`，避免阻塞排查
 - 若要同步线上改动回本地，先 `git fetch` + `git pull`，不要直接覆盖生产配置文件

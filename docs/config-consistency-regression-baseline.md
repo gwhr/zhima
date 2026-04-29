@@ -1,7 +1,7 @@
 # 配置一致性与运行回归基线
 
 状态：活文档，后续每次涉及配置、启动链路、关键业务链路的改动都必须同步更新  
-最后校对：2026-04-22
+最后校对：2026-04-29
 
 ## 1. 用途
 
@@ -20,7 +20,8 @@
 2. 修改 `.env.example`、`.env.production.example`、`lib/system-config.ts` 中的默认值或解释。
 3. 修改支付、短信、邮箱、OSS、模型、Worker 启动、Redis / PostgreSQL 连接相关逻辑。
 4. 修改工作空间、代码生成收费点、源码浏览/下载、精选案例、反馈、管理端配置页等关键链路的回归预期。
-5. 修改新会话交接阅读顺序或默认回归范围。
+5. 修改生产部署拓扑、Nginx 入口归属、部署脚本或数据库迁移策略。
+6. 修改新会话交接阅读顺序或默认回归范围。
 
 ## 3. 配置源头（Source of Truth）
 
@@ -37,6 +38,8 @@
 | 存储配置 | `STORAGE_PROVIDER` / `OSS_*` + `lib/storage/oss.ts` | 本地 `.storage` 与阿里云 OSS 双模式 |
 | 队列/后台任务 | `REDIS_URL` + `pnpm worker:dev` | Web 只负责入队，Worker 负责消费 |
 | 充值套餐运行时读取 | `lib/billing/plans.ts` + 平台配置 | 用户侧只能看到已发布套餐，支付回调按运行时套餐结算 |
+| 生产部署目录 | `/opt/zhima`（当前线上） + `docker-compose.prod.yml` | 2026-04-29 已确认当前线上仓库目录为 `/opt/zhima` |
+| 公网入口 / 反代 | 宿主机 `nginx`（当前线上） + `nginx/default.conf`（仓库配置候选） | 2026-04-29 已确认当前 `80/443` 由宿主机 `nginx` 持有，不是 compose `nginx` 容器 |
 
 ## 4. 本地与生产环境预期差异
 
@@ -49,6 +52,8 @@
 | 支付参数 | 可留空 | 上线支付前必须完整配置 | 包含 `HUPIJIAO_APPID` / `HUPIJIAO_SECRET` |
 | 模型供应商 Key | 可仅配最小可运行集合 | 应完整配置或由后台覆盖 | 后台保存优先，环境变量为回退 |
 | 支持二维码 | 可用占位图 | 可用占位图或正式二维码 | 前后台文案要一致 |
+| Web 入口层 | 本地直接访问 `localhost:3000` | 当前生产由宿主机 `nginx` 反代到容器 `3000` | `docker-compose.prod.yml` 内 `nginx` 服务当前不在现网流量路径 |
+| 数据库迁移方式 | `pnpm db:push` / 本地手工调整 | 当前生产不能直接套用 `prisma migrate deploy` | 生产库尚未建立 Prisma migration baseline，schema 变更需单独制定方案 |
 
 ## 5. 最小运行回归基线
 
@@ -87,6 +92,15 @@
    - `/admin/token-ledger`
    - `/admin/models`
    以上页面至少能正常加载
+
+### 5.3 每次涉及生产部署链路或服务器更新后必须补充验证
+
+1. 服务器目录仍为 `/opt/zhima`，且 `git rev-parse --short HEAD` 与目标提交一致。
+2. `docker compose -f docker-compose.prod.yml ps` 中 `app`、`worker` 至少为 `Up` 状态。
+3. `curl -I https://www.cloudzhima.com` 返回 `200` 或预期跳转，不出现持续 `502`。
+4. `ss -ltnp '( sport = :80 or sport = :443 )'` 的结果要与预期入口一致；当前线上应看到宿主机 `nginx` 持有 `80/443`。
+5. 若本次发布不涉及 Prisma schema 变更，不要强行执行 `npx prisma migrate deploy`。
+6. 若本次发布涉及 Prisma schema 变更，先确认 production migration baseline，再决定是否执行 `migrate deploy`。
 
 ## 6. 配置改动时的同步规则
 
@@ -134,13 +148,15 @@
 6. `README.md`
 7. 近期 PRD
 
-## 9. 当前基线判断（2026-04-15）
+## 9. 当前基线判断（2026-04-29）
 
 1. 支付回调闭环：已落地，默认作为回归项，不再作为待修主线。
 2. 工作空间创建稳定性：已做 fail-soft 与 schema-not-ready 兜底。
 3. 用户反馈提交与分页一致性：已实现，OpenSpec 已补归档。
 4. 本地/生产配置模板：支付、短信、邮箱、OSS、模型已补齐到模板。
 5. 当前主流程已经从“运行预览”切换为“生成代码收费 + 源码浏览/下载 + 精选案例参考”；后续相关改动必须按这条链路回归。
+6. 当前生产入口实际是“宿主机 `nginx` + compose 内 `app/worker`”，不是 `docker-compose.prod.yml` 里的 `nginx` 容器。
+7. 当前生产库未建立 Prisma migration baseline；部署文档里的迁移步骤不能直接照抄到所有版本发布。
 
 ## 10. 维护约束
 
