@@ -1,143 +1,258 @@
-# 新会话交接文档（2026-04-15）
-
-> 用途：你准备开一个新会话时，把这份文档发给新会话，让它快速接管项目并继续开发。  
+﻿# 新会话交接文档（最近更新：2026-04-29）
+> 用途：换电脑或开启新会话时，先读这份文档，再开始本地环境配置和后续开发。  
 > 仓库：`gwhr/zhima`  
-> 分支：`main`
-> 最新提交：`4b46d48 feat: rework workspace delivery and showcase flow`（已推送到 `origin/main`）  
-> 当前工作区状态：干净，无未提交改动
+> 默认分支：`main`  
+> 当前线上已验证版本：`2cc0869 fix: refocus workspace detail layout`（2026-04-29 已部署到生产）  
+> 新电脑原则：直接拉取 `origin/main` 最新 HEAD，不要以旧会话里的历史提交号为准。
 
-## 0. 本次会话最新结论（给换电脑继续的人先看）
+## 0. 这次最近完成了什么
 
-1. 当前代码和文档已经统一提交并推送到远端：`4b46d48`。
-2. 本次已完成的主要内容：
-   - 更新交接文档与 OpenSpec 主线说明。
-   - 新增活文档 [config-consistency-regression-baseline.md](/D:/code/plantcloud/毕设助手/docs/config-consistency-regression-baseline.md)。
-   - 补齐 `2026-04-15-user-feedback-feature` 与 `2026-04-15-config-consistency-regression-baseline` 两组 OpenSpec 归档。
-   - 完成“三栏工作台 + 源码浏览/下载 + 精选案例”改版，并推送到 `main`。
-3. 已完成线上代码同步：服务器目录确认在 `/opt/zhima`，线上 `app/worker` 已切到新镜像，`https://www.cloudzhima.com` 于 2026-04-29 校验返回 `200 OK`。
-4. 这次部署同时确认了两个重要现实：
-   - 公网 `80/443` 当前由宿主机 `nginx` 持有，不是 `docker-compose.prod.yml` 里的 `nginx` 容器。
-   - 生产库尚未建立 Prisma migration baseline，`prisma migrate deploy` 不能作为默认上线动作。
-5. 下一台电脑接手时，先 `git pull origin main`，确认拿到 `4b46d48`，再继续本地验证或后续迭代。
-
-## 1. 新会话必须先做的事（阅读顺序）
-
-1. 先读 [openspec/ROADMAP.md](/D:/code/plantcloud/毕设助手/openspec/ROADMAP.md)
-2. 再读 [openspec/ROADMAP.addendum-2026-03-25.md](/D:/code/plantcloud/毕设助手/openspec/ROADMAP.addendum-2026-03-25.md)
-3. 再读 [openspec/ROADMAP.addendum-2026-04-15.md](/D:/code/plantcloud/毕设助手/openspec/ROADMAP.addendum-2026-04-15.md)
-4. 再读 [docs/config-consistency-regression-baseline.md](/D:/code/plantcloud/毕设助手/docs/config-consistency-regression-baseline.md)
-5. 先读当前进行中的 OpenSpec 变更：
+1. 工作空间页面继续收口：
+   - `需求文档` 已提升为工作空间标题下的第一块主内容。
+   - `Token 用量`、`一对一辅导`、`统计` 已从工作空间主页面移出，不再喧宾夺主。
+   - 页面主线现在是：`需求文档 -> 功能确认 -> 生成与交付 -> AI 对话`。
+2. `运行预览` 仍然保持下线状态，当前产品真相是：
+   - 需求确认
+   - 生成项目代码（主收费触发点）
+   - 源码浏览 / 下载
+   - 生成论文
+   - 查看精选案例（独立页）
+3. 生产环境已同步并验证：
+   - 服务器目录：`/opt/zhima`
+   - 生产 `app/worker` 已重建
+   - [https://www.cloudzhima.com](https://www.cloudzhima.com) 于 2026-04-29 返回 `200 OK`
+4. 最新活跃 OpenSpec 变更仍是：
    - `openspec/changes/2026-04-22-workspace-delivery-and-showcase`
-6. 再读 `openspec/changes/archive/` 下最近归档：
-   - `2026-03-29-token-points-billing`
-   - `2026-03-31-workspace-flow-and-runtime-preview`
-   - `2026-04-02-auth-workspace-billing-stability`
-   - `2026-04-02-free-tier-funnel-and-support-contact`
-   - `2026-04-02-token-plan-publish-config`
-   - `2026-04-07-source-preview-scope-and-key-pages`
-   - `2026-04-14-thesis-online-preview-partial`
-   - `2026-04-15-user-feedback-feature`
-   - `2026-04-15-config-consistency-regression-baseline`
-6. 再读 [README.md](/D:/code/plantcloud/毕设助手/README.md)
-7. 最后读 `docs/` 下近期 PRD（按日期倒序）
 
-## 2. 项目结构速览（给新会话快速定位）
+## 1. 新会话 / 新电脑先读哪些文档
 
-- `app/`：Next.js App Router 页面与 API 路由
-- `components/`：核心业务组件（工作空间、源码浏览、对话、后台页面组件）
-- `lib/`：AI 调度、计费、支付、短信、存储、队列工具
-- `worker/`：BullMQ 后台任务（代码生成、论文生成、图表等）
-- `prisma/`：数据模型与迁移
-- `openspec/`：需求变更、增补说明与归档基线
-- `docs/`：产品文档、部署说明、交接资料
+按这个顺序读：
 
-## 3. 启动与自检流程（本地）
+1. `openspec/ROADMAP.md`
+2. `openspec/ROADMAP.addendum-2026-03-25.md`
+3. `openspec/ROADMAP.addendum-2026-04-15.md`
+4. `docs/config-consistency-regression-baseline.md`
+5. `openspec/changes/2026-04-22-workspace-delivery-and-showcase/README.md`
+6. `openspec/changes/2026-04-22-workspace-delivery-and-showcase/workspace-delivery-and-showcase/proposal.md`
+7. `openspec/changes/2026-04-22-workspace-delivery-and-showcase/workspace-delivery-and-showcase/specs.md`
+8. `openspec/changes/2026-04-22-workspace-delivery-and-showcase/workspace-delivery-and-showcase/tasks.md`
+9. `README.md`
 
-1. 安装依赖：`pnpm install`
-2. 启动依赖服务：`docker compose up -d postgres redis`
-3. 同步数据库：`pnpm db:push`
-4. 启动 Web：`pnpm dev`
-5. 启动 Worker：`pnpm worker:dev`
-6. 基本检查：
-   - `http://localhost:3000` 可访问
-   - 登录/注册可用
-   - 创建工作空间可用
-   - 代码生成任务能入队并有状态变化
+最近归档的 OpenSpec 重点看：
 
-## 4. 生产环境操作约定（非常重要）
+- `openspec/changes/archive/2026-03-29-token-points-billing`
+- `openspec/changes/archive/2026-03-31-workspace-flow-and-runtime-preview`
+- `openspec/changes/archive/2026-04-02-auth-workspace-billing-stability`
+- `openspec/changes/archive/2026-04-02-free-tier-funnel-and-support-contact`
+- `openspec/changes/archive/2026-04-02-token-plan-publish-config`
+- `openspec/changes/archive/2026-04-07-source-preview-scope-and-key-pages`
+- `openspec/changes/archive/2026-04-14-thesis-online-preview-partial`
+- `openspec/changes/archive/2026-04-15-user-feedback-feature`
+- `openspec/changes/archive/2026-04-15-config-consistency-regression-baseline`
 
-1. 生产库数据不能被初始化覆盖
-2. 每次部署前先确认 `.env.production` 未被重置
-3. 每次部署后优先回归：
-   - 工作空间创建
-   - 充值下单与回调状态变更
-   - 用户反馈提交与列表
-   - 管理端用户/流水/模型页可正常加载
-4. 部署后若出现 500，先看容器日志再改代码，不要盲目重建数据库
-5. 当前已确认线上目标机器是 `47.238.84.115`，项目目录是 `/opt/zhima`
-6. 当前公网 `80/443` 由宿主机 `nginx` 占用并反代到 `app:3000`；不要默认认为 compose 里的 `nginx` 服务正在接公网流量
-7. `docker-compose.prod.yml` 里的 `nginx` 服务当前如果直接 `up -d`，会与宿主机 `nginx` 发生端口冲突
-8. 当前生产库尚未建立 Prisma migration baseline；如果发布不涉及 schema 变更，不要机械执行 `prisma migrate deploy`
-9. 不要把生产凭据、服务器密码、`.env.production` 内容写入仓库文档
+## 2. 当前产品真实状态（很重要）
 
-## 5. OpenSpec 工作规范（必须遵守）
+1. 创建工作空间的向导流程没有推翻：
+   - 题目 / 功能点输入
+   - AI 整理需求
+   - 用户确认需求
+   - 创建工作空间
+2. 进入工作空间后，不再承诺“在线运行用户项目”。
+3. `生成项目代码` 是主收费触发点；源码浏览和下载属于生成后的交付能力，不再额外卡一次“预览收费口”。
+4. `精选案例` 是平台案例页，不是当前用户项目的在线运行结果。
+5. 工作空间主页面的内容优先级必须保持：
+   - 需求文档优先
+   - 功能确认次之
+   - 生成与交付
+   - AI 对话
+   - 阶段/概览只做辅助
+6. 如果未来有人又想把 `Token/客服/support/统计` 塞回工作空间首页，要先和当前 OpenSpec 对齐，不要直接回退页面心智。
 
-每个功能点都按这 4 步：
+## 3. 新电脑本地环境配置（直接照做）
 
-1. 开发前先补 OpenSpec（proposal/specs/tasks）
-2. 实现功能
-3. 浏览器或接口自测通过
-4. 归档到 `openspec/changes/archive/<date>-<feature>/`
+### 3.1 前置安装
 
-补充规则：
+1. Node.js：建议 `20.x`
+2. pnpm：建议 `9.x` 或当前项目锁文件兼容版本
+3. Docker Desktop
+4. Git
 
-- 只要改动影响配置说明、环境变量、启动链路或关键业务回归范围，必须同步更新 [config-consistency-regression-baseline.md](/D:/code/plantcloud/毕设助手/docs/config-consistency-regression-baseline.md)
+### 3.2 拉代码
 
-## 6. 状态校正（以下问题已修复，不再作为首要排查项）
-
-1. 支付回调后订单状态与余额未及时变化：
-   - 已由 [token-plan-publish-config](/D:/code/plantcloud/毕设助手/openspec/changes/archive/2026-04-02-token-plan-publish-config/README.md) 与 [token-points-billing](/D:/code/plantcloud/毕设助手/openspec/changes/archive/2026-03-29-token-points-billing/README.md) 覆盖。
-   - 当前回调路径为事务内更新订单并充值钱包：`/api/payment/notify`。
-2. 工作空间创建失败 / 接口 500 稳定性：
-   - 已由 [auth-workspace-billing-stability](/D:/code/plantcloud/毕设助手/openspec/changes/archive/2026-04-02-auth-workspace-billing-stability/README.md) 覆盖。
-   - 工作空间创建、列表、详情均已加入 fail-soft/结构兜底。
-3. 用户反馈提交与分页列表一致性：
-   - 已补 OpenSpec 归档 [user-feedback-feature](/D:/code/plantcloud/毕设助手/openspec/changes/archive/2026-04-15-user-feedback-feature/README.md)。
-   - 当前代码已具备用户提交、我的反馈分页、管理端分页检索、状态处理与图片鉴权。
-4. 生产与本地配置一致性（支付、短信、OSS、模型）：
-   - `.env.example` 与 `.env.production.example` 已同步支付、短信、邮箱、OSS、模型相关字段。
-   - 平台默认配置与运行时归一化集中在 `lib/system-config.ts`。
-
-## 7. 当前建议优先关注点
-
-1. 新电脑先执行 `git pull origin main`，确认 HEAD 是 `4b46d48`。
-2. 先做一轮本地启动与回归，确认当前仓库在你接手时的真实可用状态。
-3. 当前产品主流程改版已上线，后续重点是补真实“精选案例”内容，而不是回头恢复运行预览。
-4. 生产相关仍应重点关注真实 OSS 接入、部署文档、宿主机 `nginx` / compose `nginx` 拓扑收口、以及 Prisma migration baseline。
-5. 若后续继续改业务功能，支付回调、工作空间稳定性、用户反馈、配置一致性这几项应按“回归检查项”对待，而不是重新当作待修主线。
-
-## 8. 可直接复制给“新会话”的首条提示词
-
-```text
-请先完整阅读 openspec/ROADMAP.md、openspec/ROADMAP.addendum-2026-03-25.md、openspec/ROADMAP.addendum-2026-04-15.md、docs/config-consistency-regression-baseline.md，以及 openspec/changes/archive 最近归档（重点 2026-03-29、2026-03-31、2026-04-02、2026-04-07、2026-04-14、2026-04-15），然后阅读 README.md 与 docs 下最近 PRD。
-阅读后先做一次本地启动与自检（pnpm install、docker compose up -d postgres redis、pnpm db:push、pnpm dev、pnpm worker:dev），输出当前可用状态与阻塞点。
-接着按 OpenSpec 流程继续开发：开发前补变更、开发后自测、最后归档。注意支付回调闭环、工作空间稳定性、用户反馈列表/提交、配置一致性这几项已经落地，默认作为回归项而不是待修主线。若本次改动影响配置解释、环境变量或关键链路回归范围，必须同步更新 docs/config-consistency-regression-baseline.md。
+```bash
+git clone https://github.com/gwhr/zhima.git
+cd zhima
+git checkout main
+git pull origin main
 ```
 
-## 9. 交接补充
+### 3.3 安装依赖
 
-- 当前远端 `origin/main` 已包含这次会话全部成果；换电脑无需拷贝本地文件，直接拉最新代码即可
-- 当前仓库没有未提交改动；如果新电脑出现差异，先检查是否拉到了旧提交
-- 本次已经完成服务器部署，并额外核对出：
-  - 线上仓库目录：`/opt/zhima`
-  - 当前公网入口：宿主机 `nginx`
-  - 当前真实发布链路：`git pull` -> `docker compose -f docker-compose.prod.yml build app worker` -> `docker compose -f docker-compose.prod.yml up -d --force-recreate app worker`
-  - `docker-compose.prod.yml` 中的 `nginx` 服务当前不应默认启动
-  - 生产数据库暂时不能把 `prisma migrate deploy` 当成通用发布步骤
-- 若后续继续服务器部署，建议先在新电脑上确认：
-  - `ssh root@47.238.84.115` 能稳定进入 shell
-  - `ss -ltnp '( sport = :80 or sport = :443 )'` 仍显示宿主机 `nginx` 持有公网端口
-  - 再执行代码同步与 `app/worker` 重建
-- 如果新会话遇到命令行 `node/pnpm` 识别异常，优先检查 PATH 是否被会话污染
-- Windows 场景可先用绝对路径临时执行 `pnpm.cmd`，避免阻塞排查
-- 若要同步线上改动回本地，先 `git fetch` + `git pull`，不要直接覆盖生产配置文件
+```bash
+pnpm install
+```
+
+### 3.4 启动本地 Docker 依赖
+
+```bash
+docker compose up -d postgres redis
+```
+
+本地开发默认容器：
+
+- PostgreSQL：`localhost:5433`
+- Redis：`localhost:6379`
+
+本地开发数据库默认账号（来自 `docker-compose.yml`，可以直接用）：
+
+- Host：`localhost`
+- Port：`5433`
+- Database：`zhima`
+- Username：`zhima`
+- Password：`zhima_dev`
+
+本地 Redis 默认：
+
+- URL：`redis://localhost:6379`
+- 无密码
+
+### 3.5 复制环境变量模板
+
+Windows PowerShell：
+
+```powershell
+Copy-Item .env.example .env.local
+```
+
+macOS / Linux：
+
+```bash
+cp .env.example .env.local
+```
+
+### 3.6 `.env.local` 里最少要确认的值
+
+这些值在新电脑上要至少检查一遍：
+
+```env
+DATABASE_URL=postgresql://zhima:zhima_dev@localhost:5433/zhima
+REDIS_URL=redis://localhost:6379
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=请换成你自己的随机值
+ZHIPU_API_KEY=填你可用的智谱 Key
+ZHIPU_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+```
+
+本地内置管理员默认值（仅开发环境使用）：
+
+```env
+BUILTIN_ADMIN_PHONE=15811410745
+BUILTIN_ADMIN_PASSWORD=15811410745
+BUILTIN_ADMIN_NAME=系统管理员
+```
+
+### 3.7 初始化数据库
+
+```bash
+pnpm db:push
+```
+
+### 3.8 启动 Web 和 Worker
+
+需要两个终端同时启动：
+
+```bash
+pnpm dev
+```
+
+```bash
+pnpm worker:dev
+```
+
+### 3.9 本地启动后的最小检查
+
+1. 打开 `http://localhost:3000`
+2. 确认注册 / 登录可用
+3. 确认工作空间列表页可打开
+4. 新建一个工作空间
+5. 进入工作空间后确认：
+   - `需求文档` 在最上面
+   - `功能确认`、`生成与交付` 在其后
+   - 没有把 `Token/客服/统计` 当主卡片展示
+
+## 4. 哪些凭据可以写，哪些不能写
+
+### 可以直接写在仓库文档里的
+
+1. 本地 Docker 开发库默认账号：`zhima / zhima_dev`
+2. 本地 Redis 地址：`redis://localhost:6379`
+3. 本地内置管理员默认值：`15811410745 / 15811410745`
+4. 各种环境变量字段名和用途
+
+### 不要写进仓库文档 / 不要推到远端的
+
+1. 生产服务器 root 密码
+2. 生产数据库真实密码
+3. `.env.production` 真值
+4. AI、支付、短信、OSS 的生产密钥
+
+这些敏感值新电脑需要时：
+
+- 从旧电脑安全拷贝 `.env.local` / `.env.production` 备份
+- 或通过安全渠道单独传递
+- 不要把生产密钥写进 Git 历史
+
+## 5. 生产环境真实情况（2026-04-29 核验）
+
+1. 目标机器：`47.238.84.115`
+2. 项目目录：`/opt/zhima`
+3. 当前公网 `80/443` 由宿主机 `nginx` 持有，不是 `docker-compose.prod.yml` 里的 `nginx` 容器
+4. 当前真实发布链路：
+
+```bash
+cd /opt/zhima
+git pull --ff-only origin main
+docker compose -f docker-compose.prod.yml build app worker
+docker compose -f docker-compose.prod.yml up -d --force-recreate app worker
+curl -I https://www.cloudzhima.com
+```
+
+5. 发布时不要默认启动 compose 里的 `nginx`，否则会和宿主机 `nginx` 抢 `80/443`
+6. 当前生产库还没有建立 Prisma migration baseline
+7. 如果本次变更不涉及 `prisma/schema.prisma`，不要机械执行：
+
+```bash
+npx prisma migrate deploy
+```
+
+## 6. 继续开发时必须遵守的 OpenSpec 规则
+
+每次改动按这个顺序：
+
+1. 先补 OpenSpec
+2. 再改代码
+3. 自测通过
+4. 同步 handover / regression baseline
+5. 最后提交或归档
+
+尤其是下面这些改动，必须同步更新 `docs/config-consistency-regression-baseline.md`：
+
+- 工作空间主流程
+- 收费触发点
+- 源码浏览 / 下载
+- 精选案例定位
+- 生产部署步骤
+- Docker / 数据库 / Redis 启动方式
+
+## 7. 当前建议优先关注的后续工作
+
+1. 继续细化工作空间右侧轻侧栏和需求文档分组，而不是把运营信息塞回主页面
+2. 开始补真实 `精选案例` 内容，而不是恢复 runtime preview
+3. 单独梳理生产环境 Prisma migration baseline
+4. 把宿主机 `nginx` 与 compose `nginx` 的长期拓扑收口方案定下来
+
+## 8. 可以直接复制给新会话的首条提示词
+
+```text
+请先阅读 openspec/ROADMAP.md、openspec/ROADMAP.addendum-2026-03-25.md、openspec/ROADMAP.addendum-2026-04-15.md、docs/config-consistency-regression-baseline.md，以及当前进行中的 openspec/changes/2026-04-22-workspace-delivery-and-showcase。然后按 docs/HANDOVER-NEW-SESSION-2026-04-15.md 的“新电脑本地环境配置”完成本地启动：pnpm install、docker compose up -d postgres redis、复制 .env.example 到 .env.local、pnpm db:push、pnpm dev、pnpm worker:dev。完成后先汇报当前可用状态，再继续开发。注意当前产品不再承诺在线运行用户项目，工作空间页面必须保持“需求文档优先”的信息层级。
+```
