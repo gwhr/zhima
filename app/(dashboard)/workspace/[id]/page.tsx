@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import {
   FileText, Code, BarChart3, Settings, Play,
@@ -78,16 +77,6 @@ interface WorkspaceDetail {
   _count: { chatMessages: number; files: number; taskJobs: number };
 }
 
-interface WorkspacePlatformPolicy {
-  freeWorkspaceLimit: number;
-  requireRechargeForDownload: boolean;
-  supportContactEnabled: boolean;
-  supportContactTitle: string;
-  supportContactDescription: string;
-  supportContactQrUrl: string;
-  hasRecharged: boolean;
-}
-
 interface FileItem {
   id: string;
   path: string;
@@ -103,14 +92,6 @@ interface Job {
   result?: Record<string, unknown> | null;
   error: string | null;
   createdAt: string;
-}
-
-interface TokenSummary {
-  tokenBudget: number;
-  tokenUsed: number;
-  tokenRemaining: number;
-  inputTokens: number;
-  outputTokens: number;
 }
 
 const EMPTY_COUNTS: WorkspaceDetail["_count"] = {
@@ -269,20 +250,6 @@ function normalizeWorkspaceDetail(raw: unknown): WorkspaceDetail | null {
   };
 }
 
-function normalizeWorkspacePlatformPolicy(raw: unknown): WorkspacePlatformPolicy | null {
-  if (!isRecord(raw)) return null;
-
-  return {
-    freeWorkspaceLimit: toSafeNumber(raw.freeWorkspaceLimit, 3),
-    requireRechargeForDownload: toSafeBoolean(raw.requireRechargeForDownload, true),
-    supportContactEnabled: toSafeBoolean(raw.supportContactEnabled, false),
-    supportContactTitle: toSafeString(raw.supportContactTitle),
-    supportContactDescription: toSafeString(raw.supportContactDescription),
-    supportContactQrUrl: toSafeString(raw.supportContactQrUrl),
-    hasRecharged: toSafeBoolean(raw.hasRecharged, false),
-  };
-}
-
 function normalizeFileItems(raw: unknown): FileItem[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -319,17 +286,6 @@ function normalizeJobs(raw: unknown): Job[] {
     });
   }
   return jobs;
-}
-
-function normalizeTokenSummary(raw: unknown): TokenSummary | null {
-  if (!isRecord(raw)) return null;
-  return {
-    tokenBudget: Math.max(0, toSafeNumber(raw.tokenBudget)),
-    tokenUsed: Math.max(0, toSafeNumber(raw.tokenUsed)),
-    tokenRemaining: Math.max(0, toSafeNumber(raw.tokenRemaining)),
-    inputTokens: Math.max(0, toSafeNumber(raw.inputTokens)),
-    outputTokens: Math.max(0, toSafeNumber(raw.outputTokens)),
-  };
 }
 
 const statusMap: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
@@ -386,8 +342,6 @@ export default function WorkspaceDetailPage() {
   const params = useParams();
   const router = useRouter();
   const [workspace, setWorkspace] = useState<WorkspaceDetail | null>(null);
-  const [platformPolicy, setPlatformPolicy] =
-    useState<WorkspacePlatformPolicy | null>(null);
   const [files, setFiles] = useState<FileItem[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
@@ -399,7 +353,6 @@ export default function WorkspaceDetailPage() {
   const [generateMsg, setGenerateMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [showGuide, setShowGuide] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
-  const [tokenSummary, setTokenSummary] = useState<TokenSummary | null>(null);
   const [downloadingType, setDownloadingType] = useState<
     "code" | "thesis" | "chart" | "all" | null
   >(null);
@@ -415,11 +368,10 @@ export default function WorkspaceDetailPage() {
       setLoading(true);
     }
     try {
-      const [wsRes, filesRes, jobsRes, tokenRes] = await Promise.all([
+      const [wsRes, filesRes, jobsRes] = await Promise.all([
         fetch(`/api/workspace/${params.id}`),
         fetch(`/api/workspace/${params.id}/files`),
         fetch(`/api/workspace/${params.id}/jobs`),
-        fetch("/api/billing/tokens"),
       ]);
 
       const parseJsonSafe = async (res: Response) => {
@@ -430,27 +382,19 @@ export default function WorkspaceDetailPage() {
         }
       };
 
-      const [wsData, filesData, jobsData, tokenData] = await Promise.all([
+      const [wsData, filesData, jobsData] = await Promise.all([
         parseJsonSafe(wsRes),
         parseJsonSafe(filesRes),
         parseJsonSafe(jobsRes),
-        parseJsonSafe(tokenRes),
       ]);
 
       if (wsData?.success) {
         const payload = wsData.data ?? {};
         const rawWorkspace = payload.workspace ? payload.workspace : payload;
         const normalizedWorkspace = normalizeWorkspaceDetail(rawWorkspace);
-        if (payload.workspace) {
-          setWorkspace(normalizedWorkspace);
-          setPlatformPolicy(normalizeWorkspacePlatformPolicy(payload.platformPolicy));
-        } else {
-          setWorkspace(normalizedWorkspace);
-          setPlatformPolicy(null);
-        }
+        setWorkspace(normalizedWorkspace);
       } else if (!silent) {
         setWorkspace(null);
-        setPlatformPolicy(null);
       }
       if (filesData?.success) {
         setFiles(normalizeFileItems(filesData.data));
@@ -461,11 +405,6 @@ export default function WorkspaceDetailPage() {
         setJobs(normalizeJobs(jobsData.data));
       } else if (!silent) {
         setJobs([]);
-      }
-      if (tokenData?.success) {
-        setTokenSummary(normalizeTokenSummary(tokenData.data));
-      } else if (!silent) {
-        setTokenSummary(null);
       }
     } catch (err) {
       console.error("Failed to load workspace detail:", err);
@@ -666,21 +605,6 @@ export default function WorkspaceDetailPage() {
         runningCodeElapsedSeconds
       )}），完成后会自动解锁。`
     : "等待步骤1生成代码后解锁。";
-  const tokenUsagePercent = tokenSummary
-    ? Math.min(
-        100,
-        tokenSummary.tokenBudget > 0
-          ? (tokenSummary.tokenUsed / tokenSummary.tokenBudget) * 100
-          : 0
-      )
-    : 0;
-  const showSupportCard =
-    (platformPolicy?.supportContactEnabled ?? true) &&
-    (platformPolicy?.supportContactTitle ||
-      platformPolicy?.supportContactDescription ||
-      platformPolicy?.supportContactQrUrl);
-  const supportContactQrUrl = toSafeString(platformPolicy?.supportContactQrUrl).trim()
-    || "/support-qr-placeholder.svg";
   const backendStack = (workspace.techStack.backend || "").toLowerCase();
   const isJavaBackend = backendStack.includes("java");
   const isNodeBackend = backendStack.includes("node");
@@ -1013,54 +937,61 @@ cd backend
         </div>
       </div>
 
-      <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">当前阶段</CardTitle>
-          <p className="text-xs text-muted-foreground mt-1">
-            保持原有创建向导不变，进入工作空间后按下面这条交付链路推进。
-          </p>
-        </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-3">
-          {phaseItems.map((item) => {
-            const active = item.state === "active";
-            const done = item.state === "done";
-            return (
-              <div
-                key={item.step}
-                className={`rounded-2xl border p-4 ${
-                  done
-                    ? "border-emerald-200 bg-emerald-50/70"
-                    : active
-                      ? "border-primary/30 bg-primary/5"
-                      : "border-border/70 bg-muted/20"
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <div
-                    className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${
-                      done
-                        ? "bg-emerald-100 text-emerald-700"
-                        : active
-                          ? "bg-primary/15 text-primary"
-                          : "bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    {done ? "✓" : item.step}
-                  </div>
-                  <p className="text-sm font-medium">{item.title}</p>
-                </div>
-                <p className="mt-2 text-xs text-muted-foreground">{item.description}</p>
-              </div>
-            );
-          })}
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-6 xl:grid-cols-[280px,minmax(0,1fr),360px]">
-        <div className="space-y-6">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr),320px]">
+        <div className="order-3 space-y-6 xl:sticky xl:top-24 xl:self-start">
           <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">项目概况</CardTitle>
+              <CardTitle className="text-base">当前阶段</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">
+                先明确需求，再进入生成与交付，不让次要信息抢走注意力。
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {phaseItems.map((item) => {
+                const active = item.state === "active";
+                const done = item.state === "done";
+                return (
+                  <div
+                    key={item.step}
+                    className={`rounded-2xl border p-4 ${
+                      done
+                        ? "border-emerald-200 bg-emerald-50/70"
+                        : active
+                          ? "border-primary/30 bg-primary/5"
+                          : "border-border/70 bg-muted/20"
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div
+                        className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
+                          done
+                            ? "bg-emerald-100 text-emerald-700"
+                            : active
+                              ? "bg-primary/15 text-primary"
+                              : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {done ? "✓" : item.step}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">{item.title}</p>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                          {item.description}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+
+          <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">工作台概览</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">
+                这里只保留当前项目的必要背景，其他计费与支持信息移回对应页面。
+              </p>
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
@@ -1082,26 +1013,24 @@ cd backend
                   </Badge>
                 ))}
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-xl bg-muted/30 px-3 py-2">
-                  <p className="text-[11px] text-muted-foreground">模块数</p>
-                  <p className="mt-1 text-lg font-semibold">
-                    {workspace.requirements.modules?.length ?? 0}
-                  </p>
+              <div className="rounded-2xl border border-border/70 bg-muted/15 p-4">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">当前状态</span>
+                  <Badge variant={status.variant}>{status.label}</Badge>
                 </div>
-                <div className="rounded-xl bg-muted/30 px-3 py-2">
-                  <p className="text-[11px] text-muted-foreground">角色数</p>
-                  <p className="mt-1 text-lg font-semibold">
-                    {workspace.requirements.roles?.length ?? 0}
-                  </p>
-                </div>
-                <div className="rounded-xl bg-muted/30 px-3 py-2">
-                  <p className="text-[11px] text-muted-foreground">代码文件</p>
-                  <p className="mt-1 text-lg font-semibold">{codeFiles.length}</p>
-                </div>
-                <div className="rounded-xl bg-muted/30 px-3 py-2">
-                  <p className="text-[11px] text-muted-foreground">任务数</p>
-                  <p className="mt-1 text-lg font-semibold">{workspace._count.taskJobs}</p>
+                <div className="mt-3 space-y-2 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">需求确认</span>
+                    <span className="font-medium">{featureConfirmed ? "已确认" : "待确认"}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">源码交付</span>
+                    <span className="font-medium">{hasCodeFiles ? "已生成" : "未生成"}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">论文交付</span>
+                    <span className="font-medium">{hasThesisFiles ? "已生成" : "未生成"}</span>
+                  </div>
                 </div>
               </div>
               <Button variant="outline" className="w-full" onClick={() => router.push("/showcase")}>
@@ -1110,95 +1039,9 @@ cd backend
               </Button>
             </CardContent>
           </Card>
-
-          <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Token 用量</CardTitle>
-              <p className="text-xs text-muted-foreground mt-1">
-                生成项目代码会在这里冻结并结算点数
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">已使用</span>
-                <span className="font-medium">
-                  {(tokenSummary?.tokenUsed ?? 0).toLocaleString()} / {(tokenSummary?.tokenBudget ?? 0).toLocaleString()}
-                </span>
-              </div>
-              <Progress value={tokenUsagePercent} className="h-2" />
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div className="rounded-md bg-muted/40 py-2">
-                  <p className="text-xs text-muted-foreground">总量</p>
-                  <p className="text-sm font-medium">{(tokenSummary?.tokenBudget ?? 0).toLocaleString()}</p>
-                </div>
-                <div className="rounded-md bg-muted/40 py-2">
-                  <p className="text-xs text-muted-foreground">已用</p>
-                  <p className="text-sm font-medium">{(tokenSummary?.tokenUsed ?? 0).toLocaleString()}</p>
-                </div>
-                <div className="rounded-md bg-muted/40 py-2">
-                  <p className="text-xs text-muted-foreground">剩余</p>
-                  <p className="text-sm font-medium">{(tokenSummary?.tokenRemaining ?? 0).toLocaleString()}</p>
-                </div>
-              </div>
-              <Button variant="outline" className="w-full" onClick={() => router.push("/dashboard/billing")}>
-                积分充值
-              </Button>
-            </CardContent>
-          </Card>
-
-          {showSupportCard && (
-            <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">
-                  {platformPolicy?.supportContactTitle || "一对一辅导（人工）"}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <p className="text-xs text-muted-foreground">
-                  {platformPolicy?.supportContactDescription ||
-                    "可联系客服获取选题把关、部署排错、答辩材料梳理等一对一支持。"}
-                </p>
-                {supportContactQrUrl ? (
-                  <div className="rounded-lg border bg-white p-2">
-                    <img
-                      src={supportContactQrUrl}
-                      alt="客服二维码"
-                      className="mx-auto h-40 w-40 rounded object-contain"
-                    />
-                    <p className="mt-2 text-center text-[11px] text-muted-foreground">
-                      扫码添加客服
-                    </p>
-                  </div>
-                ) : (
-                  <div className="rounded-md bg-muted/50 px-3 py-2 text-[11px] text-muted-foreground">
-                    暂未配置二维码，请联系管理员在平台配置中补充。
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">统计</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {[
-                { label: "对话消息", value: workspace._count.chatMessages },
-                { label: "文件数量", value: workspace._count.files },
-                { label: "任务数量", value: workspace._count.taskJobs },
-                { label: "创建时间", value: new Date(workspace.createdAt).toLocaleDateString("zh-CN") },
-              ].map((item) => (
-                <div key={item.label} className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">{item.label}</span>
-                  <span className="font-medium">{item.value}</span>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
         </div>
 
-        <div className="space-y-6">
+        <div className="order-2 space-y-6">
           {systemCards.length > 0 && (
             <div className="grid gap-3">
               {systemCards.map((item) => (
@@ -1589,7 +1432,7 @@ cd backend
           )}
         </div>
 
-        <div className="space-y-6">
+        <div className="order-1 space-y-6 xl:col-span-2">
           <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">需求文档</CardTitle>
