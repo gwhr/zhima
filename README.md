@@ -97,7 +97,7 @@ pnpm worker:dev
 │   └── api/                    # 30 个 API 路由
 │       ├── auth/               # 认证（注册、登录、发送验证码）
 │       ├── ai/                 # AI（题目推荐、需求拆解）
-│       ├── workspace/[id]/     # 工作空间（生成代码、论文、预览构建、文件管理、代码应用）
+│       ├── workspace/[id]/     # 工作空间（生成代码、论文、文件浏览、代码应用）
 │       ├── chat/               # AI 对话（流式响应 + 项目上下文注入）
 │       ├── billing/            # 计费（套餐、配额）
 │       ├── payment/            # 支付（创建订单、回调）
@@ -106,7 +106,7 @@ pnpm worker:dev
 │   ├── ui/                     # shadcn/ui 基础组件
 │   ├── layout/                 # 导航栏、侧边栏
 │   ├── create-workspace-dialog.tsx  # 多步骤创建项目向导
-│   ├── code-preview-dialog.tsx # 项目预览弹窗（运行预览 + 文件浏览双Tab）
+│   ├── code-preview-dialog.tsx # 源码浏览弹窗（core/full 范围切换 + 下载）
 │   ├── chat-panel.tsx          # AI 对话面板（流式对话）
 │   ├── chat-message.tsx        # 消息渲染（Markdown + 代码高亮 + 一键应用）
 │   └── notification-bell.tsx   # 通知铃铛
@@ -154,12 +154,13 @@ pnpm worker:dev
 2. `openspec/ROADMAP.addendum-2026-03-25.md`
 3. `openspec/ROADMAP.addendum-2026-04-15.md`
 4. `docs/config-consistency-regression-baseline.md`
-5. `openspec/changes/archive/` 下最近归档
+5. `openspec/changes/` 下当前进行中的变更
+6. `openspec/changes/archive/` 下最近归档
 
 ## 浏览器全链路实测（Live）
 
 该项目已内置 Playwright 全链路用例：`e2e/full-flow.live.spec.ts`  
-覆盖流程：注册 → 创建工作空间 → 生成代码 → 生成论文 → 预览 → 下载。
+覆盖流程：注册 → 创建工作空间 → 生成代码 → 生成论文 → 源码浏览 → 下载。
 
 运行前请确保：
 - `pnpm dev` 可正常启动
@@ -193,11 +194,12 @@ npx pnpm exec playwright test e2e/full-flow.live.spec.ts
 1. 用户注册/登录（邮箱 或 手机号）
 2. 创建工作空间（AI 推荐选题 → 选技术栈 → 生成需求清单）
 3. 进入工作空间后先做“功能确认闸门”：确认当前需求或输入修改想法，由 AI 重分析并先完成难度评估
-4. 点击"生成代码" → BullMQ 队列 → Worker 调用 AI → 代码存入存储层（本地/OSS）
+4. 点击"生成代码" → 作为主收费触发点冻结 Token 点数 → BullMQ 队列 → Worker 调用 AI → 代码存入存储层（本地/OSS）
 5. 点击"生成论文" → Worker 自动生成图表（ER图/架构图/用例图，Mermaid→SVG→PNG）+ AI 撰写 9 章 → 图表/表格自动嵌入 → 输出 DOCX
-6. 点击"预览" → 运行预览（自动构建前端界面 + 示例数据）或文件浏览（源码/论文/图表）
-7. AI 对话修改代码 → 输入指令 → AI 给出修改方案 → 一键应用到项目文件
-8. 下载压缩包，按本地运行指南部署
+6. 点击"源码浏览" → 查看 `core/full` 范围的生成源码，并继续下载项目文件
+7. 查看“精选案例” → 参考平台精选项目方向与交付效果（独立于当前工作空间）
+8. AI 对话修改代码 → 输入指令 → AI 给出修改方案 → 一键应用到项目文件
+9. 下载压缩包，按本地运行指南部署
 
 ## 常见问题
 
@@ -246,4 +248,4 @@ docker compose ps  # 确认 postgres 和 redis 都是 Running
 - 代码生成、论文生成、AI 对话都会记录 `AiUsageLog` 的 `inputTokens/outputTokens`。
 - 系统按用户历史 `AiUsageLog` 聚合计算 `tokenUsed`，并与 `DEFAULT_USER_TOKEN_BUDGET` 比较。
 - 当余额不足时，接口会返回 `402`，任务不会进入队列。
-- 下载能力受平台策略控制：当 `REQUIRE_RECHARGE_FOR_DOWNLOAD=true` 时，用户需先完成充值后才能下载完整包。
+- 主收费触发点位于“生成项目代码”；源码浏览与下载作为生成后的交付能力，不再额外增加第二层下载收费口。

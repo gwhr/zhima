@@ -23,7 +23,9 @@
 2. 再读 [openspec/ROADMAP.addendum-2026-03-25.md](/D:/code/plantcloud/毕设助手/openspec/ROADMAP.addendum-2026-03-25.md)
 3. 再读 [openspec/ROADMAP.addendum-2026-04-15.md](/D:/code/plantcloud/毕设助手/openspec/ROADMAP.addendum-2026-04-15.md)
 4. 再读 [docs/config-consistency-regression-baseline.md](/D:/code/plantcloud/毕设助手/docs/config-consistency-regression-baseline.md)
-5. 再读 `openspec/changes/archive/` 下最近归档：
+5. 先读当前进行中的 OpenSpec 变更：
+   - `openspec/changes/2026-04-22-workspace-delivery-and-showcase`
+6. 再读 `openspec/changes/archive/` 下最近归档：
    - `2026-03-29-token-points-billing`
    - `2026-03-31-workspace-flow-and-runtime-preview`
    - `2026-04-02-auth-workspace-billing-stability`
@@ -39,7 +41,7 @@
 ## 2. 项目结构速览（给新会话快速定位）
 
 - `app/`：Next.js App Router 页面与 API 路由
-- `components/`：核心业务组件（工作空间、预览、对话、后台页面组件）
+- `components/`：核心业务组件（工作空间、源码浏览、对话、后台页面组件）
 - `lib/`：AI 调度、计费、支付、短信、存储、队列工具
 - `worker/`：BullMQ 后台任务（代码生成、论文生成、图表等）
 - `prisma/`：数据模型与迁移
@@ -105,9 +107,10 @@
 
 1. 新电脑先执行 `git pull origin main`，确认 HEAD 是 `57eb3c8`。
 2. 先做一轮本地启动与回归，确认当前仓库在你接手时的真实可用状态。
-3. 如需继续生产部署，先恢复本机到 `47.238.84.115:22` 的稳定 SSH 路径，再上服务器确认项目目录与容器状态。
-4. 生产相关仍应重点关注真实 OSS 接入、部署文档、备份脚本与 HTTPS。
-5. 若后续继续改业务功能，以上 4 项应按“回归检查项”对待，而不是重新当作待修主线。
+3. 当前有一个进行中的产品改版方向：去掉运行预览，改成“三栏工作台 + 源码浏览/下载 + 精选案例”。
+4. 如需继续生产部署，先恢复本机到 `47.238.84.115:22` 的稳定 SSH 路径，再上服务器确认项目目录与容器状态。
+5. 生产相关仍应重点关注真实 OSS 接入、部署文档、备份脚本与 HTTPS。
+6. 若后续继续改业务功能，以上 4 项应按“回归检查项”对待，而不是重新当作待修主线。
 
 ## 8. 可直接复制给“新会话”的首条提示词
 

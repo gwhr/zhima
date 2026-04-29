@@ -186,8 +186,8 @@ function defaultHomepageProcessSteps(): HomepageProcessStep[] {
       imageUrl: "",
     },
     {
-      title: "预览、导出与提交",
-      description: "在线预览全量文件，导出压缩包后本地运行并按导师要求完善。",
+      title: "浏览源码、参考案例与交付",
+      description: "浏览源码与论文文件，查看精选案例方向，并导出压缩包后本地完善。",
       imageUrl: "",
     },
   ];
@@ -293,7 +293,7 @@ export function getDefaultPlatformConfigFromEnv(): PlatformConfig {
     homepageProcessTitle: process.env.HOMEPAGE_PROCESS_TITLE || "操作流程",
     homepageProcessDescription:
       process.env.HOMEPAGE_PROCESS_DESCRIPTION ||
-      "跟着步骤走，小白也能快速推进到可预览、可导出的阶段。",
+      "跟着步骤走，小白也能快速推进到可交付、可下载的阶段。",
     homepageProcessSteps: defaultSteps,
     tokenRechargePlans: defaultRechargePlans,
   };

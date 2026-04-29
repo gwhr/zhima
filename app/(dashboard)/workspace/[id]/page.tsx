@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +12,7 @@ import {
   FileText, Code, BarChart3, Settings, Play,
   Download, ArrowLeft, Loader2,
   Users, Layers, ChevronRight, Info,
-  Package, BookOpen, HelpCircle, Monitor, Terminal, MessageCircle, Upload,
+  Package, BookOpen, HelpCircle, Monitor, Terminal, MessageCircle,
   CheckCircle2, PencilLine,
 } from "lucide-react";
 import {
@@ -343,7 +343,7 @@ const jobTypeLabels: Record<string, string> = {
   CODE_GEN: "代码生成",
   THESIS_GEN: "论文生成",
   CHART_RENDER: "图表渲染",
-  PREVIEW: "项目预览",
+  PREVIEW: "源码浏览",
 };
 
 const fileTypeIcons: Record<string, typeof Code> = {
@@ -370,8 +370,8 @@ const jobStageHints: Record<string, string[]> = {
   ],
   PREVIEW: [
     "正在读取项目文件",
-    "正在构建目录树与分类",
-    "正在渲染预览页面",
+    "正在构建源码目录树",
+    "正在渲染源码浏览面板",
   ],
 };
 
@@ -392,8 +392,6 @@ export default function WorkspaceDetailPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState<string | null>(null);
-  const [uploadingTemplate, setUploadingTemplate] = useState(false);
-  const [templateUploadMsg, setTemplateUploadMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [confirmingRequirements, setConfirmingRequirements] = useState(false);
   const [reviseDialogOpen, setReviseDialogOpen] = useState(false);
   const [reviseIdea, setReviseIdea] = useState("");
@@ -410,7 +408,6 @@ export default function WorkspaceDetailPage() {
     text: string;
   } | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const templateInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadData = useCallback(async (options?: { silent?: boolean }) => {
     const silent = options?.silent ?? false;
@@ -525,9 +522,15 @@ export default function WorkspaceDetailPage() {
         );
       }
 
+      const reservedPoints = Number(data?.data?.billing?.reservedPoints);
+      const successText =
+        type === "code" && Number.isFinite(reservedPoints) && reservedPoints > 0
+          ? `${data?.data?.message || `${labels[type]}任务已提交`}，已冻结 ${reservedPoints.toLocaleString()} Token 点数，任务完成后按实际用量结算。`
+          : data?.data?.message || `${labels[type]}任务已提交，正在排队处理`;
+
       setGenerateMsg({
         type: "success",
-        text: data?.data?.message || `${labels[type]}任务已提交，正在排队处理`,
+        text: successText,
       });
       await loadData({ silent: true });
     } catch (err) {
@@ -580,39 +583,6 @@ export default function WorkspaceDetailPage() {
     }
   }
 
-  async function uploadTemplate(file: File) {
-    if (!file) return;
-
-    setUploadingTemplate(true);
-    setTemplateUploadMsg(null);
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const res = await fetch(`/api/workspace/${params.id}/upload-template`, {
-        method: "POST",
-        body: formData,
-      });
-      const data = await res.json();
-      if (!data.success) {
-        throw new Error(data.error || "上传失败");
-      }
-
-      setTemplateUploadMsg({
-        type: "success",
-        text: `模板上传成功：${file.name}`,
-      });
-      await loadData({ silent: true });
-    } catch (err) {
-      setTemplateUploadMsg({
-        type: "error",
-        text: err instanceof Error ? err.message : "上传失败，请稍后重试",
-      });
-    } finally {
-      setUploadingTemplate(false);
-    }
-  }
-
   async function confirmRequirements(action: "confirm" | "revise", userIdea?: string) {
     setConfirmingRequirements(true);
     setConfirmMsg(null);
@@ -647,29 +617,6 @@ export default function WorkspaceDetailPage() {
       setConfirmingRequirements(false);
     }
   }
-
-  /* async function confirmPreviewPassed() {
-    setConfirmingPreview(true);
-    setPreviewMsg(null);
-    try {
-      const res = await fetch(`/api/workspace/${params.id}/confirm-preview`, {
-        method: "POST",
-      });
-      const data = await res.json();
-      if (!data.success) {
-        throw new Error(data.error || "预览确认失败");
-      }
-      setPreviewMsg({ type: "success", text: "预览已确认，可以生成论文了" });
-      await loadData({ silent: true });
-    } catch (err) {
-      setPreviewMsg({
-        type: "error",
-        text: err instanceof Error ? err.message : "预览确认失败，请稍后重试",
-      });
-    } finally {
-      setConfirmingPreview(false);
-    }
-  } */
 
   if (loading) {
     return (
@@ -734,9 +681,6 @@ export default function WorkspaceDetailPage() {
       platformPolicy?.supportContactQrUrl);
   const supportContactQrUrl = toSafeString(platformPolicy?.supportContactQrUrl).trim()
     || "/support-qr-placeholder.svg";
-  const downloadNeedRecharge =
-    (platformPolicy?.requireRechargeForDownload ?? false) &&
-    !(platformPolicy?.hasRecharged ?? false);
   const backendStack = (workspace.techStack.backend || "").toLowerCase();
   const isJavaBackend = backendStack.includes("java");
   const isNodeBackend = backendStack.includes("node");
@@ -744,6 +688,90 @@ export default function WorkspaceDetailPage() {
   const isFlaskBackend = backendStack.includes("flask");
   const isDjangoBackend = backendStack.includes("django");
   const isFastapiBackend = backendStack.includes("fastapi");
+  const codeFiles = files.filter((f) => f.type === "CODE");
+  const thesisFiles = files.filter((f) => f.type === "THESIS");
+  const chartFiles = files.filter((f) => f.type === "CHART");
+  const templateFile = files.find(
+    (f) => f.type === "CONFIG" && f.path.startsWith("templates/论文模板")
+  );
+  const hasThesisFiles = thesisFiles.length > 0;
+  const hasChartFiles = chartFiles.length > 0;
+  const hasAnyFiles = hasCodeFiles || hasThesisFiles || hasChartFiles;
+  const backendCodeCount = codeFiles.filter((f) =>
+    f.path.toLowerCase().startsWith("backend/")
+  ).length;
+  const frontendCodeCount = codeFiles.filter((f) =>
+    f.path.toLowerCase().startsWith("frontend/")
+  ).length;
+  const sqlCodeCount = codeFiles.filter((f) => {
+    const path = f.path.toLowerCase();
+    return path.endsWith(".sql") || path.includes("/sql/");
+  }).length;
+  const otherCodeCount = Math.max(
+    0,
+    codeFiles.length - backendCodeCount - frontendCodeCount - sqlCodeCount
+  );
+  const currentPhase = hasCodeFiles ? 3 : featureConfirmed ? 2 : 1;
+  const phaseItems = [
+    {
+      step: 1,
+      title: "描述需求",
+      description: "题目与功能范围已进入当前工作空间",
+      state: "done" as const,
+    },
+    {
+      step: 2,
+      title: "AI确认需求",
+      description: featureConfirmed ? "功能范围与难度评估已完成" : "等待你确认或补充修改意见",
+      state: featureConfirmed ? ("done" as const) : currentPhase === 2 ? ("active" as const) : ("pending" as const),
+    },
+    {
+      step: 3,
+      title: "生成项目",
+      description: hasCodeFiles
+        ? "源码已生成，可浏览、下载并继续生成论文"
+        : isCodeGenerating
+          ? "代码生成中，完成后会自动更新交付区"
+          : "点击生成项目代码后进入正式交付阶段",
+      state: hasCodeFiles
+        ? ("done" as const)
+        : featureConfirmed
+          ? ("active" as const)
+          : ("pending" as const),
+    },
+  ];
+  const systemCards = [
+    !featureConfirmed
+      ? {
+          tone: "amber",
+          title: "需求待确认",
+          description: "先确认功能范围并完成难度评估，再启动项目代码生成。",
+        }
+      : null,
+    featureConfirmed && !hasCodeFiles && !isCodeGenerating
+      ? {
+          tone: "blue",
+          title: "需求已就绪，可以生成项目了",
+          description: "这一步会冻结 Token 点数，任务完成后按实际用量结算，失败自动回退。",
+        }
+      : null,
+    isCodeGenerating
+      ? {
+          tone: "blue",
+          title: "代码生成中",
+          description: runningCodeJob
+            ? `当前进度 ${runningCodeJob.progress}% · 已运行 ${formatElapsed(runningCodeElapsedSeconds)}`
+            : "系统正在整理项目目录与关键文件，请稍候。",
+        }
+      : null,
+    hasCodeFiles
+      ? {
+          tone: "green",
+          title: "源码已交付",
+          description: "你现在可以浏览源码、下载完整项目，并继续生成毕业论文。",
+        }
+      : null,
+  ].filter(Boolean) as Array<{ tone: string; title: string; description: string }>;
 
   const backendRunGuide = isJavaBackend
     ? `# 进入后端目录
@@ -985,122 +1013,217 @@ cd backend
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Left: Chat + Actions */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Project Overview */}
-          {workspace.requirements && (workspace.requirements.roles?.length || workspace.requirements.modules?.length) && (
+      <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">当前阶段</CardTitle>
+          <p className="text-xs text-muted-foreground mt-1">
+            保持原有创建向导不变，进入工作空间后按下面这条交付链路推进。
+          </p>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-3">
+          {phaseItems.map((item) => {
+            const active = item.state === "active";
+            const done = item.state === "done";
+            return (
+              <div
+                key={item.step}
+                className={`rounded-2xl border p-4 ${
+                  done
+                    ? "border-emerald-200 bg-emerald-50/70"
+                    : active
+                      ? "border-primary/30 bg-primary/5"
+                      : "border-border/70 bg-muted/20"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <div
+                    className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${
+                      done
+                        ? "bg-emerald-100 text-emerald-700"
+                        : active
+                          ? "bg-primary/15 text-primary"
+                          : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    {done ? "✓" : item.step}
+                  </div>
+                  <p className="text-sm font-medium">{item.title}</p>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">{item.description}</p>
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-6 xl:grid-cols-[280px,minmax(0,1fr),360px]">
+        <div className="space-y-6">
+          <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">项目概况</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">
+                  Workspace
+                </p>
+                <p className="mt-2 text-sm font-medium leading-6">{workspace.topic}</p>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                <Badge
+                  variant="outline"
+                  className="text-xs border-blue-200 bg-blue-50 text-blue-700"
+                >
+                  专业模式: {majorModeLabel}
+                </Badge>
+                {Object.entries(workspace.techStack).map(([key, value]) => (
+                  <Badge key={key} variant="secondary" className="text-xs">
+                    {key}: {value}
+                  </Badge>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-xl bg-muted/30 px-3 py-2">
+                  <p className="text-[11px] text-muted-foreground">模块数</p>
+                  <p className="mt-1 text-lg font-semibold">
+                    {workspace.requirements.modules?.length ?? 0}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-muted/30 px-3 py-2">
+                  <p className="text-[11px] text-muted-foreground">角色数</p>
+                  <p className="mt-1 text-lg font-semibold">
+                    {workspace.requirements.roles?.length ?? 0}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-muted/30 px-3 py-2">
+                  <p className="text-[11px] text-muted-foreground">代码文件</p>
+                  <p className="mt-1 text-lg font-semibold">{codeFiles.length}</p>
+                </div>
+                <div className="rounded-xl bg-muted/30 px-3 py-2">
+                  <p className="text-[11px] text-muted-foreground">任务数</p>
+                  <p className="mt-1 text-lg font-semibold">{workspace._count.taskJobs}</p>
+                </div>
+              </div>
+              <Button variant="outline" className="w-full" onClick={() => router.push("/showcase")}>
+                <Play className="mr-2 h-4 w-4" />
+                查看精选案例
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Token 用量</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">
+                生成项目代码会在这里冻结并结算点数
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">已使用</span>
+                <span className="font-medium">
+                  {(tokenSummary?.tokenUsed ?? 0).toLocaleString()} / {(tokenSummary?.tokenBudget ?? 0).toLocaleString()}
+                </span>
+              </div>
+              <Progress value={tokenUsagePercent} className="h-2" />
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-md bg-muted/40 py-2">
+                  <p className="text-xs text-muted-foreground">总量</p>
+                  <p className="text-sm font-medium">{(tokenSummary?.tokenBudget ?? 0).toLocaleString()}</p>
+                </div>
+                <div className="rounded-md bg-muted/40 py-2">
+                  <p className="text-xs text-muted-foreground">已用</p>
+                  <p className="text-sm font-medium">{(tokenSummary?.tokenUsed ?? 0).toLocaleString()}</p>
+                </div>
+                <div className="rounded-md bg-muted/40 py-2">
+                  <p className="text-xs text-muted-foreground">剩余</p>
+                  <p className="text-sm font-medium">{(tokenSummary?.tokenRemaining ?? 0).toLocaleString()}</p>
+                </div>
+              </div>
+              <Button variant="outline" className="w-full" onClick={() => router.push("/dashboard/billing")}>
+                积分充值
+              </Button>
+            </CardContent>
+          </Card>
+
+          {showSupportCard && (
             <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
               <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Layers className="h-4 w-4" />
-                  项目概览
+                <CardTitle className="text-base">
+                  {platformPolicy?.supportContactTitle || "一对一辅导（人工）"}
                 </CardTitle>
-                {workspace.requirements.summary && (
-                  <p className="text-sm text-muted-foreground mt-1">
-                    {workspace.requirements.summary}
-                  </p>
-                )}
-                {(Object.keys(workspace.techStack).length > 0 || majorModeLabel) && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    <Badge
-                      variant="outline"
-                      className="text-xs border-blue-200 bg-blue-50 text-blue-700"
-                    >
-                      专业模式: {majorModeLabel}
-                    </Badge>
-                    {Object.entries(workspace.techStack).map(([key, value]) => (
-                      <Badge key={key} variant="secondary" className="text-xs">
-                        {key}: {value}
-                      </Badge>
-                    ))}
-                  </div>
-                )}
               </CardHeader>
-              <CardContent className="space-y-4">
-                {/* Roles */}
-                {workspace.requirements.roles && workspace.requirements.roles.length > 0 && (
-                  <div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <Users className="h-4 w-4 text-blue-500" />
-                      <span className="text-sm font-medium">系统角色</span>
-                      <Badge variant="secondary" className="text-xs">{workspace.requirements.roles.length} 个角色</Badge>
-                    </div>
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      {workspace.requirements.roles.map((role, i) => (
-                        <div key={i} className="flex items-start gap-2 rounded-lg border p-3 bg-muted/30">
-                          <div className="h-6 w-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-medium shrink-0 mt-0.5">
-                            {role.name.charAt(0)}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium">{role.name}</p>
-                            <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{role.description}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+              <CardContent className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  {platformPolicy?.supportContactDescription ||
+                    "可联系客服获取选题把关、部署排错、答辩材料梳理等一对一支持。"}
+                </p>
+                {supportContactQrUrl ? (
+                  <div className="rounded-lg border bg-white p-2">
+                    <img
+                      src={supportContactQrUrl}
+                      alt="客服二维码"
+                      className="mx-auto h-40 w-40 rounded object-contain"
+                    />
+                    <p className="mt-2 text-center text-[11px] text-muted-foreground">
+                      扫码添加客服
+                    </p>
                   </div>
-                )}
-
-                {workspace.requirements.roles?.length && workspace.requirements.modules?.length ? <Separator /> : null}
-
-                {/* Modules */}
-                {workspace.requirements.modules && workspace.requirements.modules.length > 0 && (
-                  <div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <Layers className="h-4 w-4 text-green-500" />
-                      <span className="text-sm font-medium">功能模块</span>
-                      <Badge variant="secondary" className="text-xs">{workspace.requirements.modules.length} 个模块</Badge>
-                    </div>
-                    <div className="space-y-2">
-                      {workspace.requirements.modules.map((mod, i) => (
-                        <details key={i} className="group rounded-lg border bg-muted/30">
-                          <summary className="flex items-center gap-2 cursor-pointer p-3 text-sm font-medium hover:bg-muted/50 transition-colors list-none">
-                            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground transition-transform group-open:rotate-90" />
-                            {mod.name}
-                            <Badge variant="outline" className="ml-auto text-xs">{mod.features.length} 项功能</Badge>
-                          </summary>
-                          <div className="px-3 pb-3 pt-0">
-                            <ul className="space-y-1 ml-5">
-                              {mod.features.map((feat, j) => (
-                                <li key={j} className="text-xs text-muted-foreground list-disc">{feat}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        </details>
-                      ))}
-                    </div>
+                ) : (
+                  <div className="rounded-md bg-muted/50 px-3 py-2 text-[11px] text-muted-foreground">
+                    暂未配置二维码，请联系管理员在平台配置中补充。
                   </div>
-                )}
-
-                {/* Tables */}
-                {workspace.requirements.tables && workspace.requirements.tables.length > 0 && (
-                  <>
-                    <Separator />
-                    <div>
-                      <div className="flex items-center gap-2 mb-2">
-                        <Settings className="h-4 w-4 text-orange-500" />
-                        <span className="text-sm font-medium">数据库表</span>
-                        <Badge variant="secondary" className="text-xs">{workspace.requirements.tables.length} 张表</Badge>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {workspace.requirements.tables.map((table, i) => (
-                          <Badge key={i} variant="outline" className="text-xs font-mono">{table}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                  </>
                 )}
               </CardContent>
             </Card>
           )}
 
-          {/* Feature confirmation gate */}
+          <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">统计</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {[
+                { label: "对话消息", value: workspace._count.chatMessages },
+                { label: "文件数量", value: workspace._count.files },
+                { label: "任务数量", value: workspace._count.taskJobs },
+                { label: "创建时间", value: new Date(workspace.createdAt).toLocaleDateString("zh-CN") },
+              ].map((item) => (
+                <div key={item.label} className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">{item.label}</span>
+                  <span className="font-medium">{item.value}</span>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="space-y-6">
+          {systemCards.length > 0 && (
+            <div className="grid gap-3">
+              {systemCards.map((item) => (
+                <div
+                  key={item.title}
+                  className={`rounded-2xl border px-4 py-3 ${
+                    item.tone === "green"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                      : item.tone === "amber"
+                        ? "border-amber-200 bg-amber-50 text-amber-800"
+                        : "border-blue-200 bg-blue-50 text-blue-800"
+                  }`}
+                >
+                  <p className="text-sm font-medium">{item.title}</p>
+                  <p className="mt-1 text-xs opacity-90">{item.description}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
           <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">功能确认</CardTitle>
               <p className="text-xs text-muted-foreground mt-1">
-                先确认功能范围，再进行难度评估，最后再生成代码
+                先确认功能范围并完成难度评估，再进入正式交付阶段。
               </p>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -1146,26 +1269,6 @@ cd backend
                       ? ` · ${new Date(workspace.requirements.featureConfirmedAt).toLocaleString("zh-CN")}`
                       : ""}
                   </div>
-                  {difficultyAssessment && (
-                    <div className="rounded-md border p-3 space-y-2">
-                      <p className="text-sm font-medium">难度评估</p>
-                      <div className="grid grid-cols-3 gap-2 text-xs">
-                        <div className="rounded bg-muted/40 px-2 py-1">学术性：{difficultyAssessment.academic}</div>
-                        <div className="rounded bg-muted/40 px-2 py-1">实用性：{difficultyAssessment.practical}</div>
-                        <div className="rounded bg-muted/40 px-2 py-1">技术难度：{difficultyAssessment.difficulty}</div>
-                        <div className="rounded bg-muted/40 px-2 py-1">创新性：{difficultyAssessment.innovation}</div>
-                        <div className="rounded bg-muted/40 px-2 py-1">综合分：{difficultyAssessment.overall}</div>
-                        <div className="rounded bg-muted/40 px-2 py-1">工作量：{difficultyAssessment.workload}</div>
-                      </div>
-                      {difficultyAssessment.suggestions?.length > 0 && (
-                        <ul className="text-xs text-muted-foreground list-disc pl-4 space-y-1">
-                          {difficultyAssessment.suggestions.slice(0, 3).map((tip, idx) => (
-                            <li key={idx}>{tip}</li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  )}
                   <Button
                     size="sm"
                     variant="outline"
@@ -1193,30 +1296,38 @@ cd backend
             </CardContent>
           </Card>
 
-          {/* Actions - Step by step guide */}
           <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">操作</CardTitle>
-              <p className="text-xs text-muted-foreground mt-1">按顺序点击下方按钮，AI 将为你逐步生成毕设所需内容</p>
+              <CardTitle className="text-base">生成与交付</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">
+                运行预览已下线，当前核心交付为源码浏览、源码下载与论文生成。
+              </p>
             </CardHeader>
             <CardContent className="space-y-3">
               {generateMsg && (
-                <p
-                  className={`text-xs rounded-md px-2.5 py-2 ${
+                <div
+                  className={`rounded-md border px-2.5 py-2 text-xs ${
                     generateMsg.type === "error"
-                      ? "bg-red-50 text-red-600 border border-red-200"
-                      : "bg-green-50 text-green-700 border border-green-200"
+                      ? "border-red-200 bg-red-50 text-red-600"
+                      : "border-green-200 bg-green-50 text-green-700"
                   }`}
                 >
                   {generateMsg.text}
-                </p>
+                </div>
               )}
+
+              {generateMsg?.type === "error" &&
+                /(Token|余额不足|充值)/i.test(generateMsg.text) && (
+                  <Button variant="outline" className="w-full" onClick={() => router.push("/dashboard/billing")}>
+                    前往充值后继续生成
+                  </Button>
+                )}
 
               {renderStepCard({
                 step: 1,
                 color: "blue",
                 title: "生成项目代码",
-                desc: "根据功能模块和技术栈生成代码草稿与示例工程，便于你继续完善",
+                desc: "根据确认后的需求与技术栈生成完整源码；这一步会冻结 Token 点数，完成后按实际结算",
                 jobType: "CODE_GEN",
                 action: (
                   <Button
@@ -1238,15 +1349,15 @@ cd backend
                 waitingHint: !featureConfirmed
                   ? "请先完成上方“功能确认 + 难度评估”后再开始代码生成。"
                   : hasCodeFiles
-                  ? "代码已生成，可继续预览与生成论文。"
-                  : undefined,
+                    ? "源码已生成，可继续浏览源码、下载交付物和生成论文。"
+                    : undefined,
               })}
 
               {renderStepCard({
                 step: 2,
                 color: "green",
                 title: "生成毕业论文",
-                desc: "生成论文结构化初稿（含封面、目录、图表与参考内容），供你按规范修改完善",
+                desc: "在源码基础上生成结构化论文初稿（含图表、目录与参考内容），供你按规范继续完善",
                 jobType: "THESIS_GEN",
                 action: (
                   <Button
@@ -1267,15 +1378,15 @@ cd backend
                 waitingHint: !hasCodeFiles
                   ? waitingCodeHint
                   : isCodeGenerating
-                  ? "步骤1进行中，暂不可启动论文生成。"
-                  : undefined,
+                    ? "步骤1进行中，暂不可启动论文生成。"
+                    : undefined,
               })}
 
               {renderStepCard({
                 step: 3,
                 color: "amber",
-                title: "预览代码 & 下载",
-                desc: "查看当前阶段输出文件，并按需打包下载",
+                title: "浏览源码与下载交付",
+                desc: "浏览 core/full 源码并打包下载当前项目文件；效果展示统一放到“精选案例”页",
                 jobType: "PREVIEW",
                 disabled: files.length === 0 || isCodeGenerating,
                 action: (
@@ -1286,41 +1397,27 @@ cd backend
                       disabled={files.length === 0 || isCodeGenerating}
                       onClick={() => setShowPreview(true)}
                     >
-                      <Play className="mr-1.5 h-3 w-3" />
-                      预览
+                      <Code className="mr-1.5 h-3 w-3" />
+                      源码浏览
                     </Button>
-                    <Button size="sm" variant="outline" disabled={files.length === 0 || isCodeGenerating} onClick={() => downloadFiles("all")}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={files.length === 0 || isCodeGenerating}
+                      onClick={() => downloadFiles("all")}
+                    >
                       <Download className="mr-1.5 h-3 w-3" />
                       下载全部
                     </Button>
                   </div>
                 ),
-                waitingHint: !hasCodeFiles
-                  ? waitingCodeHint
-                  : undefined,
+                waitingHint: !hasCodeFiles ? waitingCodeHint : undefined,
               })}
-
-              {hasCodeFiles && (
-                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 flex items-start gap-2">
-                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  <span>
-                    你现在可以直接生成论文。建议先下载并本地运行代码，确认功能符合要求后再生成论文，
-                    这样论文内容会更贴合你的最终实现。
-                  </span>
-                </div>
-              )}
-
-              {!featureConfirmed && (
-                <div className="flex items-center gap-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                  <Info className="h-3.5 w-3.5 shrink-0" />
-                  请先在上方完成“功能确认 + 难度评估”，再开始代码生成。
-                </div>
-              )}
 
               {hasCodeFiles ? (
                 <div className="flex items-center gap-2 rounded-md bg-blue-50 px-3 py-2 text-xs text-blue-600">
                   <Info className="h-3.5 w-3.5 shrink-0" />
-                  有任何问题可以在下方 AI 对话中随时提问，AI 会根据你的项目进行解答
+                  有任何问题可以在下方 AI 对话中继续修改代码、讨论实现和补充细节。
                 </div>
               ) : (
                 <div className="flex items-center gap-2 rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
@@ -1331,7 +1428,137 @@ cd backend
             </CardContent>
           </Card>
 
-          {/* Chat */}
+          <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">项目文件</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">源码、论文和图表会在这里集中交付</p>
+            </CardHeader>
+            <CardContent className="space-y-2.5">
+              <div className={`flex items-center gap-3 rounded-lg border p-3 ${hasCodeFiles ? "border-blue-200 bg-blue-50/50" : "bg-muted/30"}`}>
+                <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${hasCodeFiles ? "bg-blue-100" : "bg-gray-100"}`}>
+                  <Package className={`h-5 w-5 ${hasCodeFiles ? "text-blue-600" : "text-gray-400"}`} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">项目源代码</p>
+                  <p className="text-xs text-muted-foreground">
+                    {hasCodeFiles ? `${codeFiles.length} 个文件` : "尚未生成"}
+                  </p>
+                  {hasCodeFiles && (
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      后端 {backendCodeCount} · 前端 {frontendCodeCount} · SQL {sqlCodeCount}
+                      {otherCodeCount > 0 ? ` · 其他 ${otherCodeCount}` : ""}
+                    </p>
+                  )}
+                </div>
+                <Button
+                  size="sm"
+                  variant={hasCodeFiles ? "default" : "outline"}
+                  disabled={!hasCodeFiles || downloadingType !== null}
+                  className="shrink-0"
+                  onClick={() => void downloadFiles("code")}
+                >
+                  {downloadingType === "code" ? (
+                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                  ) : (
+                    <Download className="mr-1 h-3 w-3" />
+                  )}
+                  下载
+                </Button>
+              </div>
+
+              <div className={`flex items-center gap-3 rounded-lg border p-3 ${hasThesisFiles ? "border-green-200 bg-green-50/50" : "bg-muted/30"}`}>
+                <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${hasThesisFiles ? "bg-green-100" : "bg-gray-100"}`}>
+                  <BookOpen className={`h-5 w-5 ${hasThesisFiles ? "text-green-600" : "text-gray-400"}`} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">毕业论文</p>
+                  <p className="text-xs text-muted-foreground">
+                    {hasThesisFiles ? `${thesisFiles.length} 个文件` : "尚未生成"}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant={hasThesisFiles ? "default" : "outline"}
+                  disabled={!hasThesisFiles || downloadingType !== null}
+                  className="shrink-0"
+                  onClick={() => void downloadFiles("thesis")}
+                >
+                  {downloadingType === "thesis" ? (
+                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                  ) : (
+                    <Download className="mr-1 h-3 w-3" />
+                  )}
+                  下载
+                </Button>
+              </div>
+
+              {hasChartFiles && (
+                <div className="flex items-center gap-3 rounded-lg border border-purple-200 bg-purple-50/50 p-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-100">
+                    <BarChart3 className="h-5 w-5 text-purple-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">图表文件</p>
+                    <p className="text-xs text-muted-foreground">{chartFiles.length} 个文件</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="shrink-0"
+                    disabled={downloadingType !== null}
+                    onClick={() => void downloadFiles("chart")}
+                  >
+                    {downloadingType === "chart" ? (
+                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                    ) : (
+                      <Download className="mr-1 h-3 w-3" />
+                    )}
+                    下载
+                  </Button>
+                </div>
+              )}
+
+              <div className="rounded-lg border p-3 bg-muted/20 space-y-2">
+                <p className="text-sm font-medium">论文模板（平台统一）</p>
+                <p className="text-xs text-muted-foreground">
+                  当前工作空间不再开放用户上传模板。平台会统一使用管理员后台启用的论文模板。
+                </p>
+                {templateFile && (
+                  <p className="text-[11px] text-muted-foreground">
+                    当前平台模板：{templateFile.path.split("/").pop()}
+                  </p>
+                )}
+              </div>
+
+              {downloadMsg && (
+                <div
+                  className={`rounded-md px-3 py-2 text-xs ${
+                    downloadMsg.type === "success"
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "bg-rose-50 text-rose-700"
+                  }`}
+                >
+                  {downloadMsg.text}
+                </div>
+              )}
+
+              {hasAnyFiles ? (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => setShowGuide(true)}
+                >
+                  <HelpCircle className="mr-2 h-4 w-4" />
+                  如何本地运行项目
+                </Button>
+              ) : (
+                <div className="rounded-md bg-muted/50 px-3 py-4 text-center">
+                  <p className="text-xs text-muted-foreground">点击上方“生成代码”或“生成论文”后</p>
+                  <p className="text-xs text-muted-foreground">交付文件会显示在这里供你浏览和下载</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {hasCodeFiles ? (
             <Card className="flex h-[70vh] min-h-[560px] max-h-[860px] flex-col border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
               <CardHeader className="pb-2">
@@ -1350,9 +1577,9 @@ cd backend
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">AI 对话（待解锁）</CardTitle>
               </CardHeader>
-              <CardContent className="h-full flex items-center justify-center">
-                <div className="max-w-md text-center space-y-2">
-                  <MessageCircle className="h-8 w-8 mx-auto text-muted-foreground" />
+              <CardContent className="flex h-full items-center justify-center">
+                <div className="max-w-md space-y-2 text-center">
+                  <MessageCircle className="mx-auto h-8 w-8 text-muted-foreground" />
                   <p className="text-sm text-muted-foreground">
                     先完成“生成项目代码”，再在这里让 AI 帮你讨论细节、修改功能和调整实现。
                   </p>
@@ -1362,318 +1589,141 @@ cd backend
           )}
         </div>
 
-        {/* Right sidebar */}
         <div className="space-y-6">
-          {/* Download packages */}
           <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">项目文件</CardTitle>
-              <p className="text-xs text-muted-foreground mt-1">生成完成后可下载对应的压缩包</p>
+              <CardTitle className="text-base">需求文档</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">
+                这里固定展示当前工作空间的需求摘要、角色、模块、表结构和难度评估。
+              </p>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {(() => {
-                const codeFiles = files.filter((f) => f.type === "CODE");
-                const thesisFiles = files.filter((f) => f.type === "THESIS");
-                const chartFiles = files.filter((f) => f.type === "CHART");
-                const templateFile = files.find(
-                  (f) => f.type === "CONFIG" && f.path.startsWith("templates/论文模板")
-                );
-                const hasCode = codeFiles.length > 0;
-                const hasThesis = thesisFiles.length > 0;
-                const hasChart = chartFiles.length > 0;
-                const hasAny = hasCode || hasThesis || hasChart;
-                const backendCodeCount = codeFiles.filter((f) =>
-                  f.path.toLowerCase().startsWith("backend/")
-                ).length;
-                const frontendCodeCount = codeFiles.filter((f) =>
-                  f.path.toLowerCase().startsWith("frontend/")
-                ).length;
-                const sqlCodeCount = codeFiles.filter((f) => {
-                  const path = f.path.toLowerCase();
-                  return path.endsWith(".sql") || path.includes("/sql/");
-                }).length;
-                const otherCodeCount = Math.max(
-                  0,
-                  codeFiles.length - backendCodeCount - frontendCodeCount - sqlCodeCount
-                );
-
-                return (
-                  <div className="space-y-2.5">
-                    <div className={`flex items-center gap-3 rounded-lg border p-3 ${hasCode ? "bg-blue-50/50 border-blue-200" : "bg-muted/30"}`}>
-                      <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${hasCode ? "bg-blue-100" : "bg-gray-100"}`}>
-                        <Package className={`h-5 w-5 ${hasCode ? "text-blue-600" : "text-gray-400"}`} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium">项目源代码</p>
-                        <p className="text-xs text-muted-foreground">
-                          {hasCode ? `${codeFiles.length} 个文件` : "尚未生成"}
-                        </p>
-                        {hasCode && (
-                          <p className="text-[11px] text-muted-foreground mt-0.5">
-                            后端 {backendCodeCount} · 前端 {frontendCodeCount} · SQL {sqlCodeCount}
-                            {otherCodeCount > 0 ? ` · 其他 ${otherCodeCount}` : ""}
-                          </p>
-                        )}
-                      </div>
-                      <Button
-                        size="sm"
-                        variant={hasCode ? "default" : "outline"}
-                        disabled={!hasCode || downloadingType !== null}
-                        className="shrink-0"
-                        onClick={() => void downloadFiles("code")}
-                      >
-                        {downloadingType === "code" ? (
-                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                        ) : (
-                          <Download className="mr-1 h-3 w-3" />
-                        )}
-                        下载
-                      </Button>
-                    </div>
-
-                    {hasCode && (
-                      <div className="rounded-md bg-blue-50 px-3 py-2 text-[11px] text-blue-700">
-                        代码下载包包含当前工作空间的全部代码文件；预览仅用于查看内容，不会影响下载范围。
-                      </div>
-                    )}
-
-                    <div className={`flex items-center gap-3 rounded-lg border p-3 ${hasThesis ? "bg-green-50/50 border-green-200" : "bg-muted/30"}`}>
-                      <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${hasThesis ? "bg-green-100" : "bg-gray-100"}`}>
-                        <BookOpen className={`h-5 w-5 ${hasThesis ? "text-green-600" : "text-gray-400"}`} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium">毕业论文</p>
-                        <p className="text-xs text-muted-foreground">
-                          {hasThesis ? `${thesisFiles.length} 个文件` : "尚未生成"}
-                        </p>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant={hasThesis ? "default" : "outline"}
-                        disabled={!hasThesis || downloadingType !== null}
-                        className="shrink-0"
-                        onClick={() => void downloadFiles("thesis")}
-                      >
-                        {downloadingType === "thesis" ? (
-                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                        ) : (
-                          <Download className="mr-1 h-3 w-3" />
-                        )}
-                        下载
-                      </Button>
-                    </div>
-
-                    {hasChart && (
-                      <div className="flex items-center gap-3 rounded-lg border p-3 bg-purple-50/50 border-purple-200">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-100">
-                          <BarChart3 className="h-5 w-5 text-purple-600" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium">图表文件</p>
-                          <p className="text-xs text-muted-foreground">{chartFiles.length} 个文件</p>
-                        </div>
-                        <Button
-                          size="sm"
-                          className="shrink-0"
-                          disabled={downloadingType !== null}
-                          onClick={() => void downloadFiles("chart")}
-                        >
-                          {downloadingType === "chart" ? (
-                            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                          ) : (
-                            <Download className="mr-1 h-3 w-3" />
-                          )}
-                          下载
-                        </Button>
-                      </div>
-                    )}
-
-                    <div className="hidden rounded-lg border p-3 bg-muted/20 space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <div>
-                          <p className="text-sm font-medium">论文模板（可选）</p>
-                          <p className="text-xs text-muted-foreground">
-                            支持 `.doc/.docx`，用于后续论文格式定制
-                          </p>
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={uploadingTemplate}
-                          onClick={() => templateInputRef.current?.click()}
-                        >
-                          {uploadingTemplate ? (
-                            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                          ) : (
-                            <Upload className="mr-1 h-3 w-3" />
-                          )}
-                          上传模板
-                        </Button>
-                      </div>
-                      <input
-                        ref={templateInputRef}
-                        type="file"
-                        accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                        className="hidden"
-                        onChange={(event) => {
-                          const selected = event.target.files?.[0];
-                          if (selected) {
-                            void uploadTemplate(selected);
-                          }
-                          event.currentTarget.value = "";
-                        }}
-                      />
-                      {templateFile && (
-                        <p className="text-xs text-muted-foreground">
-                          当前模板：{templateFile.path.split("/").pop()}（{(templateFile.size / 1024).toFixed(1)} KB）
-                        </p>
-                      )}
-                      {templateUploadMsg && (
-                        <p className={`text-xs ${templateUploadMsg.type === "success" ? "text-green-600" : "text-red-600"}`}>
-                          {templateUploadMsg.text}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="rounded-lg border p-3 bg-muted/20 space-y-2">
-                      <p className="text-sm font-medium">论文模板（平台统一）</p>
-                      <p className="text-xs text-muted-foreground">
-                        当前工作空间不再开放用户上传模板。平台会统一使用管理员后台启用的论文模板。
-                      </p>
-                    </div>
-
-                    {downloadMsg && (
-                      <div
-                        className={`rounded-md px-3 py-2 text-xs ${
-                          downloadMsg.type === "success"
-                            ? "bg-emerald-50 text-emerald-700"
-                            : "bg-rose-50 text-rose-700"
-                        }`}
-                      >
-                        {downloadMsg.text}
-                      </div>
-                    )}
-
-                    {downloadNeedRecharge && (
-                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
-                        <p className="text-sm font-medium text-amber-800">
-                          充值后解锁完整下载
-                        </p>
-                        <p className="text-xs text-amber-700">
-                          当前账号可继续预览与生成，下载完整代码/论文/图表压缩包需先充值一次 Token 点数。
-                        </p>
-                        <Button
-                          size="sm"
-                          className="w-full"
-                          onClick={() => router.push("/dashboard/billing")}
-                        >
-                          前往充值
-                        </Button>
-                      </div>
-                    )}
-
-                    {hasAny && (
-                      <Button
-                        variant="outline"
-                        className="w-full"
-                        onClick={() => setShowGuide(true)}
-                      >
-                        <HelpCircle className="mr-2 h-4 w-4" />
-                        如何本地运行项目
-                      </Button>
-                    )}
-
-                    {!hasAny && (
-                      <div className="rounded-md bg-muted/50 px-3 py-4 text-center">
-                        <p className="text-xs text-muted-foreground">点击左侧「生成代码」或「生成论文」后</p>
-                        <p className="text-xs text-muted-foreground">文件将显示在这里供你下载</p>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-            </CardContent>
-          </Card>
-
-          <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Token 用量</CardTitle>
-              <p className="text-xs text-muted-foreground mt-1">展示当前账号总额度与已使用进度</p>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">已使用</span>
-                <span className="font-medium">
-                  {(tokenSummary?.tokenUsed ?? 0).toLocaleString()} / {(tokenSummary?.tokenBudget ?? 0).toLocaleString()}
-                </span>
-              </div>
-              <Progress value={tokenUsagePercent} className="h-2" />
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div className="rounded-md bg-muted/40 py-2">
-                  <p className="text-xs text-muted-foreground">总量</p>
-                  <p className="text-sm font-medium">{(tokenSummary?.tokenBudget ?? 0).toLocaleString()}</p>
+            <CardContent className="space-y-5">
+              {workspace.requirements.summary && (
+                <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
+                  <p className="text-xs uppercase tracking-[0.22em] text-blue-700">项目概览</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-700">
+                    {workspace.requirements.summary}
+                  </p>
                 </div>
-                <div className="rounded-md bg-muted/40 py-2">
-                  <p className="text-xs text-muted-foreground">已用</p>
-                  <p className="text-sm font-medium">{(tokenSummary?.tokenUsed ?? 0).toLocaleString()}</p>
+              )}
+
+              <div>
+                <div className="mb-2 flex items-center gap-2">
+                  <Users className="h-4 w-4 text-blue-500" />
+                  <span className="text-sm font-medium">用户角色</span>
+                  <Badge variant="secondary" className="text-xs">
+                    {workspace.requirements.roles?.length ?? 0} 个角色
+                  </Badge>
                 </div>
-                <div className="rounded-md bg-muted/40 py-2">
-                  <p className="text-xs text-muted-foreground">剩余</p>
-                  <p className="text-sm font-medium">{(tokenSummary?.tokenRemaining ?? 0).toLocaleString()}</p>
+                <div className="space-y-2">
+                  {(workspace.requirements.roles ?? []).map((role, i) => (
+                    <div key={i} className="rounded-xl border bg-muted/20 p-3">
+                      <p className="text-sm font-medium">{role.name}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{role.description}</p>
+                    </div>
+                  ))}
                 </div>
               </div>
-            </CardContent>
-          </Card>
 
-          {showSupportCard && (
-            <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">
-                  {platformPolicy?.supportContactTitle || "一对一辅导（人工）"}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <p className="text-xs text-muted-foreground">
-                  {platformPolicy?.supportContactDescription ||
-                    "可联系客服获取选题把关、部署排错、答辩材料梳理等一对一支持。"}
-                </p>
-                {supportContactQrUrl ? (
-                  <div className="rounded-lg border bg-white p-2">
-                    <img
-                      src={supportContactQrUrl}
-                      alt="客服二维码"
-                      className="mx-auto h-40 w-40 rounded object-contain"
-                    />
-                    <p className="mt-2 text-center text-[11px] text-muted-foreground">
-                      扫码添加客服
-                    </p>
-                  </div>
-                ) : (
-                  <div className="rounded-md bg-muted/50 px-3 py-2 text-[11px] text-muted-foreground">
-                    暂未配置二维码，请联系管理员在平台配置中补充。
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
+              <Separator />
 
-          {/* Stats */}
-          <Card className="border-white/70 bg-white/85 shadow-[0_16px_45px_-35px_rgba(15,23,42,0.45)]">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">统计</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {[
-                { label: "对话消息", value: workspace._count.chatMessages },
-                { label: "文件数量", value: workspace._count.files },
-                { label: "任务数量", value: workspace._count.taskJobs },
-                { label: "创建时间", value: new Date(workspace.createdAt).toLocaleDateString("zh-CN") },
-              ].map((item) => (
-                <div key={item.label} className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">{item.label}</span>
-                  <span className="font-medium">{item.value}</span>
+              <div>
+                <div className="mb-2 flex items-center gap-2">
+                  <Layers className="h-4 w-4 text-green-500" />
+                  <span className="text-sm font-medium">功能模块</span>
+                  <Badge variant="secondary" className="text-xs">
+                    {workspace.requirements.modules?.length ?? 0} 个模块
+                  </Badge>
                 </div>
-              ))}
+                <div className="space-y-2">
+                  {(workspace.requirements.modules ?? []).map((mod, i) => (
+                    <details key={i} className="group rounded-xl border bg-muted/20">
+                      <summary className="flex cursor-pointer items-center gap-2 p-3 text-sm font-medium list-none">
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground transition-transform group-open:rotate-90" />
+                        {mod.name}
+                        <Badge variant="outline" className="ml-auto text-xs">
+                          {mod.features.length} 项功能
+                        </Badge>
+                      </summary>
+                      <div className="px-3 pb-3">
+                        <ul className="ml-5 space-y-1">
+                          {mod.features.map((feat, j) => (
+                            <li key={j} className="list-disc text-xs text-muted-foreground">
+                              {feat}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </details>
+                  ))}
+                </div>
+              </div>
+
+              <Separator />
+
+              <div>
+                <div className="mb-2 flex items-center gap-2">
+                  <Settings className="h-4 w-4 text-orange-500" />
+                  <span className="text-sm font-medium">数据库表</span>
+                  <Badge variant="secondary" className="text-xs">
+                    {workspace.requirements.tables?.length ?? 0} 张表
+                  </Badge>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {(workspace.requirements.tables ?? []).map((table, i) => (
+                    <Badge key={i} variant="outline" className="text-xs font-mono">
+                      {table}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+
+              <Separator />
+
+              <div>
+                <div className="mb-2 flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4 text-purple-500" />
+                  <span className="text-sm font-medium">规模评估</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded-xl bg-muted/30 px-3 py-2">预计页面：{workspace.requirements.estimatedPages ?? 0}</div>
+                  <div className="rounded-xl bg-muted/30 px-3 py-2">预计接口：{workspace.requirements.estimatedApis ?? 0}</div>
+                  <div className="rounded-xl bg-muted/30 px-3 py-2">预计表数：{workspace.requirements.estimatedTables ?? 0}</div>
+                  <div className="rounded-xl bg-muted/30 px-3 py-2">预计字数：{workspace.requirements.estimatedWords ?? 0}</div>
+                </div>
+              </div>
+
+              {difficultyAssessment && (
+                <>
+                  <Separator />
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                      <span className="text-sm font-medium">难度评估</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-xl bg-muted/30 px-3 py-2">学术性：{difficultyAssessment.academic}</div>
+                      <div className="rounded-xl bg-muted/30 px-3 py-2">实用性：{difficultyAssessment.practical}</div>
+                      <div className="rounded-xl bg-muted/30 px-3 py-2">技术难度：{difficultyAssessment.difficulty}</div>
+                      <div className="rounded-xl bg-muted/30 px-3 py-2">创新性：{difficultyAssessment.innovation}</div>
+                      <div className="rounded-xl bg-muted/30 px-3 py-2">综合分：{difficultyAssessment.overall}</div>
+                      <div className="rounded-xl bg-muted/30 px-3 py-2">工作量：{difficultyAssessment.workload}</div>
+                    </div>
+                    {difficultyAssessment.suggestions?.length > 0 && (
+                      <div className="rounded-xl border bg-muted/20 p-3">
+                        <p className="text-xs font-medium text-foreground">建议</p>
+                        <ul className="mt-2 ml-5 space-y-1">
+                          {difficultyAssessment.suggestions.slice(0, 4).map((tip, idx) => (
+                            <li key={idx} className="list-disc text-xs text-muted-foreground">
+                              {tip}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         </div>

@@ -32,7 +32,7 @@ async function waitForStepCompletion(
 test.describe("live browser full-flow", () => {
   test.skip(!RUN_LIVE, "Set E2E_LIVE=1 to run live full-flow browser test.");
 
-  test("register -> create workspace -> generate code/thesis -> preview/download", async ({
+test("register -> create workspace -> generate code/thesis -> source-browser/download", async ({
     page,
   }) => {
     test.setTimeout(25 * 60_000);
@@ -96,10 +96,8 @@ test.describe("live browser full-flow", () => {
     await expect(thesisCard).toBeVisible();
     await expect(thesisCard).not.toContainText("尚未生成");
 
-    await page.getByRole("button", { name: "预览" }).click();
-    await expect(page.getByRole("dialog")).toContainText("项目预览");
-    await page.getByRole("button", { name: "文件浏览" }).click();
-    await expect(page.getByRole("dialog")).toContainText("源代码");
+    await page.getByRole("button", { name: "源码浏览" }).click();
+    await expect(page.getByRole("dialog")).toContainText("源码浏览");
 
     const previewDialog = page.getByRole("dialog");
     const codePre = previewDialog.locator("pre").first();

@@ -2,8 +2,6 @@ import { db } from "@/lib/db";
 import { success, error } from "@/lib/api-response";
 import { requireAuth } from "@/lib/auth-helpers";
 import { downloadFile } from "@/lib/storage/oss";
-import { getPlatformConfig } from "@/lib/system-config";
-import { hasUserRecharged } from "@/lib/user-entitlements";
 
 const DEFAULT_THESIS_PREVIEW_CHAR_LIMIT = 4000;
 
@@ -42,20 +40,8 @@ export async function GET(
 
   // 论文预览对普通用户始终做“部分可见”，完整内容通过下载包获取。
   if (file.type === "THESIS" && !isAdmin) {
-    const [platformConfig, recharged] = await Promise.all([
-      getPlatformConfig().catch(() => null),
-      hasUserRecharged(session!.user.id).catch((err) => {
-        console.warn("hasUserRecharged failed in workspace file GET, fallback=false", err);
-        return false;
-      }),
-    ]);
-
-    const requireRechargeForDownload = platformConfig?.requireRechargeForDownload ?? true;
     previewLimited = true;
-    previewNotice =
-      requireRechargeForDownload && !recharged
-        ? "当前仅展示论文部分预览。充值后可下载完整论文。"
-        : "当前仅展示论文部分预览。请下载论文包查看完整内容。";
+    previewNotice = "当前仅展示论文部分预览。请下载论文包查看完整内容。";
   }
 
   let content = "";

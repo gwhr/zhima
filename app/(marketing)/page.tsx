@@ -67,7 +67,7 @@ const highlights = [
   {
     icon: ClipboardCheck,
     title: "过程可控",
-    desc: "每一步都有状态反馈和结果预览，避免盲等、误操作和反复返工。",
+    desc: "每一步都有状态反馈、需求文档和交付物查看，避免盲等、误操作和反复返工。",
   },
 ];
 
